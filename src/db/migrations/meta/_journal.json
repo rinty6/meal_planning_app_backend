@@ -5,8 +5,29 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1765453126699,
-      "tag": "0000_peaceful_giant_man",
+      "when": 1765798181965,
+      "tag": "0000_curved_black_bird",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1767436460369,
+      "tag": "0001_silky_valeria_richards",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770032981059,
+      "tag": "0002_certain_annihilus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770205590563,
+      "tag": "0003_short_reaper",
       "breakpoints": true
     }
   ]
