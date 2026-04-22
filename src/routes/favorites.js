@@ -9,6 +9,31 @@ import { eq, and } from "drizzle-orm";
 
 const favoritesRoutes = express.Router();
 
+const normalizeExternalId = (item = {}) => {
+  const rawId = item.externalId ?? item.id ?? item.foodId;
+  if (rawId !== undefined && rawId !== null && String(rawId).trim() !== "") {
+    return String(rawId);
+  }
+
+  const title = String(item.title || item.foodName || "item")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+  return `title:${title}`;
+};
+
+const normalizeFavoriteItem = (item = {}) => ({
+  externalId: normalizeExternalId(item),
+  title: item.title || item.foodName || "Untitled Item",
+  image: item.image || "",
+  calories: Number(item.calories) || 0,
+  protein: Number(item.protein) || 0,
+  carbs: Number(item.carbs) || 0,
+  fats: Number(item.fats) || 0,
+  cookTime: item.time || "",
+  servings: Number(item.servings) || 1,
+});
+
 // 1. SAVE CUSTOM RECIPE (Used by your Recipe Detail Page)
 favoritesRoutes.post("/save-custom", async (req, res) => {
   try {
@@ -58,11 +83,12 @@ favoritesRoutes.post("/toggle", async (req, res) => {
     const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
     const userId = user[0].userId;
+    const normalizedItem = normalizeFavoriteItem(item || {});
 
     // Check if it exists (using externalId)
     const existing = await db.select().from(favouritesTable).where(and(
       eq(favouritesTable.userId, userId),
-      eq(favouritesTable.externalId, String(item.id)) 
+      eq(favouritesTable.externalId, normalizedItem.externalId)
     ));
 
     if (existing.length > 0) {
@@ -73,15 +99,15 @@ favoritesRoutes.post("/toggle", async (req, res) => {
       // LIKE: Add it with Macros
       await db.insert(favouritesTable).values({
         userId,
-        externalId: String(item.id),
-        title: item.title || item.foodName, // Handle different naming conventions
-        image: item.image || "",
-        calories: item.calories,
-        protein: item.protein || 0,
-        carbs: item.carbs || 0,
-        fats: item.fats || 0,
-        cookTime: item.time || "", 
-        servings: 1
+        externalId: normalizedItem.externalId,
+        title: normalizedItem.title,
+        image: normalizedItem.image,
+        calories: normalizedItem.calories,
+        protein: normalizedItem.protein,
+        carbs: normalizedItem.carbs,
+        fats: normalizedItem.fats,
+        cookTime: normalizedItem.cookTime,
+        servings: normalizedItem.servings,
       });
       res.status(201).json({ isFavorite: true, message: "Added to favorites" });
     }
@@ -91,7 +117,62 @@ favoritesRoutes.post("/toggle", async (req, res) => {
   }
 });
 
-// 3. CHECK FAVORITE STATUS
+// 3. SAVE ALL ITEMS OF A COMBO TO FAVORITES (idempotent add)
+favoritesRoutes.post("/save-combo", async (req, res) => {
+  try {
+    const { clerkId, items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "No combo items supplied" });
+    }
+
+    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
+    if (user.length === 0) return res.status(404).json({ error: "User not found" });
+    const userId = user[0].userId;
+
+    let savedCount = 0;
+    let skippedCount = 0;
+
+    for (const rawItem of items) {
+      const item = normalizeFavoriteItem(rawItem || {});
+
+      const existing = await db.select().from(favouritesTable).where(and(
+        eq(favouritesTable.userId, userId),
+        eq(favouritesTable.externalId, item.externalId)
+      )).limit(1);
+
+      if (existing.length > 0) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await db.insert(favouritesTable).values({
+        userId,
+        externalId: item.externalId,
+        title: item.title,
+        image: item.image,
+        calories: item.calories,
+        protein: item.protein,
+        carbs: item.carbs,
+        fats: item.fats,
+        cookTime: item.cookTime,
+        servings: item.servings,
+      });
+      savedCount += 1;
+    }
+
+    return res.status(200).json({
+      success: true,
+      savedCount,
+      skippedCount,
+      message: "Combo items saved to favorites",
+    });
+  } catch (error) {
+    console.error("Save Combo Favorites Error:", error);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+
+// 4. CHECK FAVORITE STATUS
 favoritesRoutes.get("/check/:clerkId/:recipeId", async (req, res) => {
     try {
       const { clerkId, recipeId } = req.params;
@@ -101,7 +182,7 @@ favoritesRoutes.get("/check/:clerkId/:recipeId", async (req, res) => {
   
       const existing = await db.select().from(favouritesTable).where(and(
           eq(favouritesTable.userId, userId),
-          eq(favouritesTable.recipeId, String(recipeId))
+          eq(favouritesTable.externalId, String(recipeId))
       ));
   
       res.json({ isFavorite: existing.length > 0 });
@@ -110,7 +191,7 @@ favoritesRoutes.get("/check/:clerkId/:recipeId", async (req, res) => {
     }
 });
 
-// 4. GET ALL FAVORITES (Separated by type)
+// 5. GET ALL FAVORITES (Separated by type)
 favoritesRoutes.get("/list/:clerkId", async (req, res) => {
   try {
     const { clerkId } = req.params;
@@ -149,7 +230,7 @@ favoritesRoutes.get("/list/:clerkId", async (req, res) => {
   }
 });
 
-// 5. DELETE FAVORITE FOOD (Simple Item)
+// 6. DELETE FAVORITE FOOD (Simple Item)
 favoritesRoutes.delete("/delete-food/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -161,7 +242,7 @@ favoritesRoutes.delete("/delete-food/:id", async (req, res) => {
   }
 });
 
-// 6. DELETE SAVED RECIPE (Custom Detailed Recipe)
+// 7. DELETE SAVED RECIPE (Custom Detailed Recipe)
 favoritesRoutes.delete("/delete-recipe/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -173,7 +254,7 @@ favoritesRoutes.delete("/delete-recipe/:id", async (req, res) => {
   }
 });
 
-// 7. GET FULL CUSTOM RECIPE DETAILS (For Editing)
+// 8. GET FULL CUSTOM RECIPE DETAILS (For Editing)
 favoritesRoutes.get("/custom/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -188,7 +269,7 @@ favoritesRoutes.get("/custom/:id", async (req, res) => {
   }
 });
 
-// 8. UPDATE CUSTOM RECIPE
+// 9. UPDATE CUSTOM RECIPE
 favoritesRoutes.put("/update-recipe/:id", async (req, res) => {
   try {
     const { id } = req.params;

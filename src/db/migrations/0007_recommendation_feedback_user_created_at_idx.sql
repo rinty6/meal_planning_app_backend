@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "recommendation_feedback_user_created_at_idx" ON "recommendation_feedback" USING btree ("user_id","created_at");

@@ -1,5 +1,5 @@
 // This file will create relational tables in the database using Drizzle ORM
-import {pgTable, serial, text, timestamp, integer, pgEnum, real, date, json, boolean} from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, timestamp, integer, pgEnum, real, date, json, jsonb, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 // 1. Define Enums (Strict lists of options)
 // This list is created to store the activity level of each user after sign up process
@@ -53,6 +53,45 @@ export const usersTable = pgTable('user_info', {
     username: text('name').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
+
+// This table maps one user to multiple active devices/tokens.
+export const userDevicesTable = pgTable('user_devices', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  pushToken: text('push_token').notNull(),
+  platform: text('platform').notNull(), // ios | android
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  pushTokenUniqueIdx: uniqueIndex('user_devices_push_token_unique').on(table.pushToken),
+}));
+
+// This table stores in-app notification history for inbox rendering.
+export const notificationsTable = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  data: jsonb('data').default({}),
+  isRead: boolean('is_read').default(false).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userCreatedAtIdx: index('notifications_user_created_at_idx').on(table.userId, table.createdAt),
+}));
+
+export const recommendationFeedbackTable = pgTable('recommendation_feedback', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  clerkId: text('clerk_id'),
+  comboId: text('combo_id').notNull(),
+  mealType: text('meal_type').notNull(),
+  status: text('status').notNull(),
+  mlTag: text('ml_tag'),
+  explanation: text('explanation'),
+  itemTitles: jsonb('item_titles').default([]).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userCreatedAtIdx: index('recommendation_feedback_user_created_at_idx').on(table.userId, table.createdAt),
+}));
 
 export const demographicsTable = pgTable('demographics', {
   demographicsId: serial('id').primaryKey(),
