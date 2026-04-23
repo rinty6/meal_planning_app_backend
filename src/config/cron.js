@@ -1,10 +1,7 @@
-// This file will help keep our Api available by pinging it at regular intervals every 14 mins
-// This helps for the development process as some free hosting services put the app to sleep after a period of inactivity
-// Consider to use another paid plan for production deployment to avoid this issue
+// This file manages the backend's scheduled notification jobs.
 
 
 import cron from "cron";
-import https from "https";
 import dotenv from "dotenv";
 import { db } from "./db.js";
 import { usersTable, mealLogsTable, calorieGoalsTable } from "../db/schema.js";
@@ -20,16 +17,7 @@ const toNumber = (value) => {
 };
 
 
-// 1. MY EXISTING JOB (The "Keep-Alive" Worker)
-const keepAliveJob = new cron.CronJob("*/14 * * * *", function () {
-    https.get(process.env.RENDER_URL, (res) => {
-        if (res.statusCode === 200) console.log("GET request sent successfully");
-        else console.log("GET request failed", res.statusCode);
-    }).on("error", (e) => console.error("Error while sending request", e));
-});
-
-
-// 2. DAILY NOTIFICATION WORKER
+// 1. DAILY NOTIFICATION WORKER
 // Set to run at 8:00 PM (20:00) Australian Eastern Time every day
 const dailyReminderJob = new cron.CronJob("0 12 * * *", async function () {
     console.log("Running Daily Meal Reminder Push...");
@@ -104,7 +92,6 @@ const dailySummaryJob = new cron.CronJob("0 20 * * *", async function () {
 
 const cronManager = {
     start: () => {
-        keepAliveJob.start();
         dailyReminderJob.start();
         dailySummaryJob.start();
     }
