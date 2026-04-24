@@ -23,6 +23,26 @@ import feedbackRoutes from './routes/feedback.js';
 
 const app = express();
 const PORT = ENV.PORT || 3000;
+const MISSING_ROUTE_LOG_WINDOW_MS = 15 * 60 * 1000;
+const recentMissingRouteLogs = new Map();
+
+const buildHealthPayload = () => ({
+  success: true,
+  service: 'backend',
+  uptimeSeconds: Math.round(process.uptime()),
+});
+
+const shouldLogMissingRoute = (method, path) => {
+  const cacheKey = `${method}:${path}`;
+  const now = Date.now();
+  const lastLoggedAt = recentMissingRouteLogs.get(cacheKey) || 0;
+  if (now - lastLoggedAt < MISSING_ROUTE_LOG_WINDOW_MS) {
+    return false;
+  }
+
+  recentMissingRouteLogs.set(cacheKey, now);
+  return true;
+};
 
 // Increased limit to 50mb to handle Base64 images
 app.use(express.json({ limit: '50mb' }));
@@ -32,8 +52,18 @@ if (ENV.NODE_ENV === "production") {job.start();}
 
 app.use(express.json());
 
+// Serve a stable root response so platform probes do not fail on `/`.
+app.get('/', (req, res) => {
+  res.status(200).json(buildHealthPayload());
+});
+
+// Mirror the health response on a generic path used by some hosting probes.
+app.get('/health', (req, res) => {
+  res.status(200).json(buildHealthPayload());
+});
+
 app.get("/api/health", (req, res) => {
-  res.status(200).json({success: true});
+  res.status(200).json(buildHealthPayload());
 });
 
 app.use('/api/users', userRoutes);
@@ -49,6 +79,22 @@ app.use('/api/devices', deviceRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/prime', primeRoutes);
 app.use('/api/feedback', feedbackRoutes);
+
+app.use((req, res) => {
+  const requestPath = req.originalUrl || req.url || '/';
+  if ((req.method === 'GET' || req.method === 'HEAD') && shouldLogMissingRoute(req.method, requestPath)) {
+    // Log sampled missing-route details so repeated platform probes are identifiable.
+    console.warn('[server.js] Unmatched GET/HEAD request', {
+      method: req.method,
+      path: requestPath,
+      host: req.get('host') || null,
+      userAgent: req.get('user-agent') || null,
+      ip: req.ip || null,
+    });
+  }
+
+  res.status(404).json({ error: 'Not found' });
+});
 
 void ensureRecommendationFeedbackStorage().catch((error) => {
   console.error('Recommendation feedback storage bootstrap failed:', error);
