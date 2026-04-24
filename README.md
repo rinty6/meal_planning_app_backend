@@ -64,8 +64,8 @@ Core variables:
 
 Recommendation service variables:
 
-- `ML_SERVICE_URL`: defaults to `http://127.0.0.1:5001/api/recommendation`
-- `ML_SERVICE_PRIME_URL`: defaults to `http://127.0.0.1:5001/api/prime`
+- `ML_SERVICE_URL`: defaults to `http://localhost/api/recommendation`
+- `ML_SERVICE_PRIME_URL`: defaults to `http://localhost/api/prime`
 - `RECOMMENDATION_DEBUG_LOGS`: set to `1` to log detailed recommendation timing and response summaries
 
 Feature-specific variables:
