@@ -26,11 +26,35 @@ const PORT = ENV.PORT || 3000;
 const MISSING_ROUTE_LOG_WINDOW_MS = 15 * 60 * 1000;
 const recentMissingRouteLogs = new Map();
 
+const bytesToMb = (value) => Math.round((Number(value || 0) / (1024 * 1024)) * 100) / 100;
+
 const buildHealthPayload = () => ({
   success: true,
   service: 'backend',
   uptimeSeconds: Math.round(process.uptime()),
 });
+
+const buildRuntimeHealthPayload = () => {
+  const cpuUsage = process.cpuUsage();
+  const memoryUsage = process.memoryUsage();
+
+  return {
+    success: true,
+    service: 'backend',
+    generatedAt: new Date().toISOString(),
+    pid: process.pid,
+    uptimeSeconds: Math.round(process.uptime()),
+    process: {
+      cpuUserSeconds: Math.round((Number(cpuUsage.user || 0) / 1_000_000) * 1000) / 1000,
+      cpuSystemSeconds: Math.round((Number(cpuUsage.system || 0) / 1_000_000) * 1000) / 1000,
+      rssMb: bytesToMb(memoryUsage.rss),
+      heapTotalMb: bytesToMb(memoryUsage.heapTotal),
+      heapUsedMb: bytesToMb(memoryUsage.heapUsed),
+      externalMb: bytesToMb(memoryUsage.external),
+      arrayBuffersMb: bytesToMb(memoryUsage.arrayBuffers),
+    },
+  };
+};
 
 const shouldLogMissingRoute = (method, path) => {
   const cacheKey = `${method}:${path}`;
@@ -64,6 +88,11 @@ app.get('/health', (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.status(200).json(buildHealthPayload());
+});
+
+// Mirror backend process telemetry on a dedicated route for Phase 10 runtime measurement.
+app.get('/api/health/runtime', (req, res) => {
+  res.status(200).json(buildRuntimeHealthPayload());
 });
 
 app.use('/api/users', userRoutes);
