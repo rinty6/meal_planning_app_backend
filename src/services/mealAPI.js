@@ -257,12 +257,14 @@ export const buildRetrieverQueries = ({ query, retrieverKeywords = [], goal = "m
 
 const normalizeSearchInput = (queryOrOptions, maxResults, defaultMax) => {
   if (typeof queryOrOptions === "object" && queryOrOptions !== null) {
+    const retrieverKeywords = ensureArray(queryOrOptions.retrieverKeywords);
     return {
       query: String(queryOrOptions.query || "").trim(),
-      retrieverKeywords: ensureArray(queryOrOptions.retrieverKeywords),
+      retrieverKeywords,
       goal: queryOrOptions.goal || "maintain",
       mealType: queryOrOptions.mealType || "lunch",
       maxResults: Number.parseInt(queryOrOptions.maxResults, 10) || maxResults || defaultMax,
+      expandQueries: queryOrOptions.expandQueries === true || retrieverKeywords.length > 0,
     };
   }
 
@@ -272,13 +274,15 @@ const normalizeSearchInput = (queryOrOptions, maxResults, defaultMax) => {
     goal: "maintain",
     mealType: "lunch",
     maxResults: Number.parseInt(maxResults, 10) || defaultMax,
+    expandQueries: false,
   };
 };
 
 export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions = {}) => {
-  const { throwOnError = false } = routeOptions;
+  const { throwOnError = false, expandQueries } = routeOptions;
   const input = normalizeSearchInput(queryOrOptions, maxResults, 1);
-  const queries = buildRetrieverQueries(input);
+  const shouldExpandQueries = expandQueries ?? input.expandQueries;
+  const queries = shouldExpandQueries ? buildRetrieverQueries(input) : uniqueStrings([input.query]);
   if (queries.length === 0) return [];
 
   const mappedResults = await Promise.all(
@@ -337,9 +341,10 @@ export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions
 };
 
 export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptions = {}) => {
-  const { throwOnError = false } = routeOptions;
+  const { throwOnError = false, expandQueries } = routeOptions;
   const input = normalizeSearchInput(queryOrOptions, maxResults, 3);
-  const queries = buildRetrieverQueries(input);
+  const shouldExpandQueries = expandQueries ?? input.expandQueries;
+  const queries = shouldExpandQueries ? buildRetrieverQueries(input) : uniqueStrings([input.query]);
   if (queries.length === 0) return [];
 
   const mappedResults = await Promise.all(

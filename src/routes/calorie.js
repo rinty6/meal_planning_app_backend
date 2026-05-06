@@ -116,20 +116,21 @@ const calculateMacronutrientTargets = ({ calorieTarget, goal, activityLevel }) =
 };
 
 const getDailyCalorieTargetContext = async (userId, dateStr) => {
-  const demographics = await db
-    .select()
-    .from(demographicsTable)
-    .where(eq(demographicsTable.userId, userId))
-    .limit(1);
+  const [demographics, activeGoals] = await Promise.all([
+    db
+      .select()
+      .from(demographicsTable)
+      .where(eq(demographicsTable.userId, userId))
+      .limit(1),
+    db
+      .select()
+      .from(calorieGoalsTable)
+      .where(and(eq(calorieGoalsTable.userId, userId), lte(calorieGoalsTable.startDate, dateStr), gte(calorieGoalsTable.endDate, dateStr)))
+      .orderBy(desc(calorieGoalsTable.createdAt))
+      .limit(1),
+  ]);
 
   const profile = demographics.length > 0 ? demographics[0] : null;
-
-  const activeGoals = await db
-    .select()
-    .from(calorieGoalsTable)
-    .where(and(eq(calorieGoalsTable.userId, userId), lte(calorieGoalsTable.startDate, dateStr), gte(calorieGoalsTable.endDate, dateStr)))
-    .orderBy(desc(calorieGoalsTable.createdAt))
-    .limit(1);
 
   if (activeGoals.length > 0) {
     const activeGoal = activeGoals[0];
@@ -189,6 +190,160 @@ const normalizeMealDateKey = (value) => {
     }
   }
   return null;
+};
+
+const buildDailySummaryPayload = async (userId, dateStr, targetContextOverride = null) => {
+  const targetContext = targetContextOverride || (await getDailyCalorieTargetContext(userId, dateStr));
+  const targetCalories = Math.max(MIN_DAILY_CALORIES, Math.round(toNumber(targetContext.dailyCalories) || DEFAULT_DAILY_CALORIES));
+
+  const macroGoal = targetContext.demographics?.goal || "maintain";
+  const macroActivityLevel = targetContext.demographics?.activityLevel || "moderately_active";
+  const macroTargets = calculateMacronutrientTargets({
+    calorieTarget: targetCalories,
+    goal: macroGoal,
+    activityLevel: macroActivityLevel,
+  });
+
+  const target = {
+    ...(targetContext.goalRecord || {}),
+    dailyCalories: targetCalories,
+    source: targetContext.source,
+  };
+
+  const meals = await db
+    .select()
+    .from(mealLogsTable)
+    .where(and(eq(mealLogsTable.userId, userId), eq(mealLogsTable.date, dateStr)));
+
+  let totalCalories = 0;
+  let totalProtein = 0;
+  let totalCarbs = 0;
+  let totalFats = 0;
+
+  meals.forEach((meal) => {
+    totalCalories += toNumber(meal.calories);
+    totalProtein += toNumber(meal.protein);
+    totalCarbs += toNumber(meal.carbs);
+    totalFats += toNumber(meal.fats);
+  });
+
+  const roundedConsumedCalories = Math.round(totalCalories);
+  const remaining = Math.max(0, Math.round(targetCalories - totalCalories));
+  const exhausted = Math.max(0, Math.round(totalCalories - targetCalories));
+  const isOverTarget = totalCalories > targetCalories;
+
+  return {
+    goal: target,
+    target: {
+      dailyCalories: targetCalories,
+      protein: macroTargets.grams.protein,
+      carbs: macroTargets.grams.carbs,
+      fats: macroTargets.grams.fats,
+      ratios: macroTargets.ratios,
+      source: targetContext.source,
+    },
+    consumed: {
+      calories: roundedConsumedCalories,
+      protein: Math.round(totalProtein),
+      carbs: Math.round(totalCarbs),
+      fats: Math.round(totalFats),
+    },
+    remaining,
+    exhausted,
+    isOverTarget,
+  };
+};
+
+const getWeekBounds = (dateStr) => {
+  const refDate = new Date(`${dateStr}T00:00:00`);
+  const dayOfWeek = refDate.getDay();
+  const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  const monday = new Date(refDate);
+  monday.setDate(refDate.getDate() - diffToMon);
+
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  return {
+    monday,
+    startStr: getLocalYYYYMMDD(monday),
+    endStr: getLocalYYYYMMDD(sunday),
+  };
+};
+
+const buildWeeklyPayload = async (userId, dateStr) => {
+  const { monday, startStr, endStr } = getWeekBounds(dateStr);
+
+  const meals = await db
+    .select()
+    .from(mealLogsTable)
+    .where(and(eq(mealLogsTable.userId, userId), gte(mealLogsTable.date, startStr), lte(mealLogsTable.date, endStr)));
+
+  const weeklyData = {};
+  const current = new Date(monday);
+
+  for (let i = 0; i < 7; i++) {
+    const dStr = getLocalYYYYMMDD(current);
+    weeklyData[dStr] = {
+      day: current.toLocaleDateString("en-US", { weekday: "short" }),
+      date: dStr,
+      calories: 0,
+    };
+    current.setDate(current.getDate() + 1);
+  }
+
+  meals.forEach((meal) => {
+    const dateKey = normalizeMealDateKey(meal.date);
+    if (dateKey && weeklyData[dateKey]) {
+      weeklyData[dateKey].calories += toNumber(meal.calories);
+    }
+  });
+
+  return Object.values(weeklyData);
+};
+
+const parseInsightsWindow = (value) => {
+  const requestedWindow = Number.parseInt(String(value || "28"), 10);
+  return Math.min(84, Math.max(7, Number.isFinite(requestedWindow) ? requestedWindow : 28));
+};
+
+const buildInsightsPayload = async (userId, dateStr, requestedWindow = 28, options = {}) => {
+  const windowDays = parseInsightsWindow(requestedWindow);
+  const referenceDate = new Date(`${dateStr}T00:00:00`);
+  const startDate = new Date(referenceDate);
+  startDate.setDate(referenceDate.getDate() - (windowDays - 1));
+  const startStr = getLocalYYYYMMDD(startDate);
+  const hasDemographicsOverride = Object.prototype.hasOwnProperty.call(options, "demographicsOverride");
+
+  const [demographics, goals, meals] = await Promise.all([
+    hasDemographicsOverride
+      ? Promise.resolve(options.demographicsOverride ? [options.demographicsOverride] : [])
+      : db.select().from(demographicsTable).where(eq(demographicsTable.userId, userId)).limit(1),
+    db
+      .select()
+      .from(calorieGoalsTable)
+      .where(
+        and(
+          eq(calorieGoalsTable.userId, userId),
+          lte(calorieGoalsTable.startDate, dateStr),
+          gte(calorieGoalsTable.endDate, startStr)
+        )
+      )
+      .orderBy(desc(calorieGoalsTable.createdAt)),
+    db
+      .select()
+      .from(mealLogsTable)
+      .where(and(eq(mealLogsTable.userId, userId), gte(mealLogsTable.date, startStr), lte(mealLogsTable.date, dateStr))),
+  ]);
+
+  return buildCalorieInsights({
+    referenceDate: dateStr,
+    windowDays,
+    meals,
+    demographics: demographics[0] || null,
+    goals,
+  });
 };
 
 // 1. CREATE NEW GOAL
@@ -311,71 +466,38 @@ calorieRoutes.get("/summary/:clerkId/:date", async (req, res) => {
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
     const userId = user[0].userId;
 
-    // 2. Resolve daily calorie target from active goal first, then BMR fallback.
-    const targetContext = await getDailyCalorieTargetContext(userId, dateStr);
-    const targetCalories = Math.max(MIN_DAILY_CALORIES, Math.round(toNumber(targetContext.dailyCalories) || DEFAULT_DAILY_CALORIES));
-
-    const macroGoal = targetContext.demographics?.goal || "maintain";
-    const macroActivityLevel = targetContext.demographics?.activityLevel || "moderately_active";
-    const macroTargets = calculateMacronutrientTargets({
-      calorieTarget: targetCalories,
-      goal: macroGoal,
-      activityLevel: macroActivityLevel,
-    });
-
-    const target = {
-      ...(targetContext.goalRecord || {}),
-      dailyCalories: targetCalories,
-      source: targetContext.source,
-    };
-
-    // 3. Get meals for the requested date.
-    const meals = await db
-      .select()
-      .from(mealLogsTable)
-      .where(and(eq(mealLogsTable.userId, userId), eq(mealLogsTable.date, dateStr)));
-
-    // 4. Calculate totals using numeric coercion to avoid string concatenation bugs.
-    let totalCalories = 0;
-    let totalProtein = 0;
-    let totalCarbs = 0;
-    let totalFats = 0;
-
-    meals.forEach((meal) => {
-      totalCalories += toNumber(meal.calories);
-      totalProtein += toNumber(meal.protein);
-      totalCarbs += toNumber(meal.carbs);
-      totalFats += toNumber(meal.fats);
-    });
-
-    const roundedConsumedCalories = Math.round(totalCalories);
-    const remaining = Math.max(0, Math.round(targetCalories - totalCalories));
-    const exhausted = Math.max(0, Math.round(totalCalories - targetCalories));
-    const isOverTarget = totalCalories > targetCalories;
-
-    // 5. Return data
-    res.json({
-      goal: target,
-      target: {
-        dailyCalories: targetCalories,
-        protein: macroTargets.grams.protein,
-        carbs: macroTargets.grams.carbs,
-        fats: macroTargets.grams.fats,
-        ratios: macroTargets.ratios,
-        source: targetContext.source,
-      },
-      consumed: {
-        calories: roundedConsumedCalories,
-        protein: Math.round(totalProtein),
-        carbs: Math.round(totalCarbs),
-        fats: Math.round(totalFats),
-      },
-      remaining,
-      exhausted,
-      isOverTarget,
-    });
+    res.json(await buildDailySummaryPayload(userId, dateStr));
   } catch (error) {
     console.error("Summary Error:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+calorieRoutes.get("/dashboard/:clerkId/:date", async (req, res) => {
+  try {
+    const { clerkId, date } = req.params;
+    const dateStr = normalizeDateString(date);
+    if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
+
+    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
+    if (user.length === 0) return res.status(404).json({ error: "User not found" });
+    const userId = user[0].userId;
+
+    const targetContextPromise = getDailyCalorieTargetContext(userId, dateStr);
+    const weeklyPromise = buildWeeklyPayload(userId, dateStr);
+    const targetContext = await targetContextPromise;
+
+    const [summary, weekly, insights] = await Promise.all([
+      buildDailySummaryPayload(userId, dateStr, targetContext),
+      weeklyPromise,
+      buildInsightsPayload(userId, dateStr, req.query.window, {
+        demographicsOverride: targetContext.demographics || null,
+      }),
+    ]);
+
+    res.json({ summary, weekly, insights });
+  } catch (error) {
+    console.error("Dashboard Summary Error:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -392,49 +514,7 @@ calorieRoutes.get("/weekly/:clerkId/:date", async (req, res) => {
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
     const userId = user[0].userId;
 
-    // 2. Calculate week range (Mon -> Sun) in local time.
-    const refDate = new Date(`${dateStr}T00:00:00`);
-    const dayOfWeek = refDate.getDay();
-    const diffToMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-
-    const monday = new Date(refDate);
-    monday.setDate(refDate.getDate() - diffToMon);
-
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-
-    const startStr = getLocalYYYYMMDD(monday);
-    const endStr = getLocalYYYYMMDD(sunday);
-
-    // 3. Query meals in the week range.
-    const meals = await db
-      .select()
-      .from(mealLogsTable)
-      .where(and(eq(mealLogsTable.userId, userId), gte(mealLogsTable.date, startStr), lte(mealLogsTable.date, endStr)));
-
-    // 4. Build 7-day response scaffold.
-    const weeklyData = {};
-    const current = new Date(monday);
-
-    for (let i = 0; i < 7; i++) {
-      const dStr = getLocalYYYYMMDD(current);
-      weeklyData[dStr] = {
-        day: current.toLocaleDateString("en-US", { weekday: "short" }),
-        date: dStr,
-        calories: 0,
-      };
-      current.setDate(current.getDate() + 1);
-    }
-
-    // 5. Populate scaffold.
-    meals.forEach((meal) => {
-      const dateKey = normalizeMealDateKey(meal.date);
-      if (dateKey && weeklyData[dateKey]) {
-        weeklyData[dateKey].calories += toNumber(meal.calories);
-      }
-    });
-
-    res.json(Object.values(weeklyData));
+    res.json(await buildWeeklyPayload(userId, dateStr));
   } catch (error) {
     console.error("Weekly Error:", error);
     res.status(500).json({ error: "Server error" });
@@ -454,39 +534,7 @@ calorieRoutes.get("/insights/:clerkId/:date", async (req, res) => {
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
     const userId = user[0].userId;
 
-    const referenceDate = new Date(`${dateStr}T00:00:00`);
-    const startDate = new Date(referenceDate);
-    startDate.setDate(referenceDate.getDate() - (windowDays - 1));
-    const startStr = getLocalYYYYMMDD(startDate);
-
-    const [demographics, goals, meals] = await Promise.all([
-      db.select().from(demographicsTable).where(eq(demographicsTable.userId, userId)).limit(1),
-      db
-        .select()
-        .from(calorieGoalsTable)
-        .where(
-          and(
-            eq(calorieGoalsTable.userId, userId),
-            lte(calorieGoalsTable.startDate, dateStr),
-            gte(calorieGoalsTable.endDate, startStr)
-          )
-        )
-        .orderBy(desc(calorieGoalsTable.createdAt)),
-      db
-        .select()
-        .from(mealLogsTable)
-        .where(and(eq(mealLogsTable.userId, userId), gte(mealLogsTable.date, startStr), lte(mealLogsTable.date, dateStr))),
-    ]);
-
-    const insights = buildCalorieInsights({
-      referenceDate: dateStr,
-      windowDays,
-      meals,
-      demographics: demographics[0] || null,
-      goals,
-    });
-
-    res.json(insights);
+    res.json(await buildInsightsPayload(userId, dateStr, windowDays));
   } catch (error) {
     console.error("Calorie Insights Error:", error);
     res.status(500).json({ error: "Server error" });
