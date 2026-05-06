@@ -1,8 +1,8 @@
 // This file handles the shopping process
 import express from "express";
 import { db } from "../config/db.js";
-import { shoppingListsTable, shoppingItemsTable, usersTable, recipesTable } from "../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+import { shoppingListsTable, shoppingItemsTable, usersTable } from "../db/schema.js";
+import { eq, desc, sql } from "drizzle-orm";
 
 const shoppingRoutes = express.Router();
 
@@ -16,17 +16,22 @@ shoppingRoutes.get("/list/:clerkId", async (req, res) => {
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
     const userId = user[0].userId;
 
-    // Fetch lists ordered by newest
-    const lists = await db.select().from(shoppingListsTable).where(eq(shoppingListsTable.userId, userId)).orderBy(desc(shoppingListsTable.createdAt));
-    
-    // For each list, count total items
-    // (Optional optimization: we could do a JOIN count here, but a loop is fine for small scale)
-    const listsWithCount = await Promise.all(lists.map(async (list) => {
-        const items = await db.select().from(shoppingItemsTable).where(eq(shoppingItemsTable.listId, list.id));
-        return { ...list, itemCount: items.length };
-    }));
+    // Fetch lists with item counts in one query instead of one count query per list.
+    const lists = await db
+      .select({
+        id: shoppingListsTable.id,
+        userId: shoppingListsTable.userId,
+        title: shoppingListsTable.title,
+        createdAt: shoppingListsTable.createdAt,
+        itemCount: sql`cast(count(${shoppingItemsTable.id}) as int)`,
+      })
+      .from(shoppingListsTable)
+      .leftJoin(shoppingItemsTable, eq(shoppingItemsTable.listId, shoppingListsTable.id))
+      .where(eq(shoppingListsTable.userId, userId))
+      .groupBy(shoppingListsTable.id, shoppingListsTable.userId, shoppingListsTable.title, shoppingListsTable.createdAt)
+      .orderBy(desc(shoppingListsTable.createdAt));
 
-    res.json(listsWithCount);
+    res.json(lists.map((list) => ({ ...list, itemCount: Number(list.itemCount) || 0 })));
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Server error" });

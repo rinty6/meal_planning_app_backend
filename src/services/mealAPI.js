@@ -75,6 +75,8 @@ const ensureArray = (value) => {
 };
 
 const normalizeWord = (value) => String(value ?? "").trim().toLowerCase();
+// Reject non-FatSecret ids before they are proxied upstream.
+const isFatSecretNumericId = (value) => /^\d+$/.test(String(value ?? "").trim());
 
 const uniqueStrings = (values) => {
   const deduped = [];
@@ -396,16 +398,27 @@ export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptio
 
 export const getFoodItemById = async (foodId, options = {}) => {
   const { expectedCalories = 0, throwOnError = false } = options;
-  if (!foodId) return null;
+  const normalizedFoodId = String(foodId || "").trim();
+  if (!normalizedFoodId) return null;
+  // Stop invalid app-level ids before making a FatSecret API request.
+  if (!isFatSecretNumericId(normalizedFoodId)) {
+    const invalidIdError = new FatSecretApiError("Invalid FatSecret food_id.", {
+      status: 400,
+      code: "invalid_food_id",
+      details: { foodId: normalizedFoodId },
+    });
+    if (throwOnError) throw invalidIdError;
+    return null;
+  }
 
-  const cacheKey = makeCacheKey("food.get.v5", [foodId, expectedCalories]);
+  const cacheKey = makeCacheKey("food.get.v5", [normalizedFoodId, expectedCalories]);
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
   try {
     const params = new URLSearchParams({
       method: "food.get.v5",
-      food_id: String(foodId),
+      food_id: normalizedFoodId,
       format: "json",
       include_food_images: "true",
     });
@@ -467,8 +480,11 @@ export const getFoodItemById = async (foodId, options = {}) => {
 
     return setCached(cacheKey, mapped);
   } catch (error) {
-    console.error("getFoodItemById Error:", error);
-    if (throwOnError) throw coerceFatSecretError(error, "Food detail lookup failed.");
+    const normalizedError = coerceFatSecretError(error, "Food detail lookup failed.");
+    if (Number(normalizedError?.status) >= 500) {
+      console.error("getFoodItemById Error:", normalizedError);
+    }
+    if (throwOnError) throw normalizedError;
     return null;
   }
 };
