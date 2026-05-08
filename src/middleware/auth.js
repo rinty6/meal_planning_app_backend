@@ -17,7 +17,23 @@ const getClerkIdFallback = (req) => {
   return String(fromHeader || fromBody || fromParams || "").trim() || null;
 };
 
+const shouldLogBootstrapAuth = (req) => {
+  const requestPath = req.originalUrl || req.url || "";
+  return requestPath.includes("/api/users/bootstrap");
+};
+
+const logBootstrapAuth = (req, payload) => {
+  if (!shouldLogBootstrapAuth(req)) return;
+
+  console.log("user.bootstrap.auth", {
+    path: req.originalUrl || req.url || null,
+    ...payload,
+  });
+};
+
 export const requireClerkAuth = async (req, res, next) => {
+  const authStartedAt = Date.now();
+
   try {
     const hasSecretKey =
       !!ENV.CLERK_SECRET_KEY && ENV.CLERK_SECRET_KEY.startsWith("sk_");
@@ -27,6 +43,13 @@ export const requireClerkAuth = async (req, res, next) => {
     // Fallback for environments that do not provide a Clerk secret key.
     // This supports local/dev setups using only publishable key config.
     if (!hasSecretKey) {
+      // Log missing production auth config without printing secrets.
+      logBootstrapAuth(req, {
+        phase: 'missing-secret-key',
+        durationMs: Date.now() - authStartedAt,
+        fallbackClerkIdPresent: !!fallbackClerkId,
+      });
+
       if (!fallbackClerkId) {
         return res
           .status(401)
@@ -41,31 +64,74 @@ export const requireClerkAuth = async (req, res, next) => {
     }
 
     const token = getBearerToken(req);
+    logBootstrapAuth(req, {
+      phase: 'verify-start',
+      hasSecretKey,
+      hasBearerToken: !!token,
+      devFallbackAllowed,
+    });
+
     if (!token && devFallbackAllowed && fallbackClerkId) {
       req.auth = { clerkId: fallbackClerkId, sessionClaims: null, insecureFallback: true };
+      logBootstrapAuth(req, {
+        phase: 'dev-fallback',
+        durationMs: Date.now() - authStartedAt,
+        fallbackClerkId,
+      });
       return next();
     }
-    if (!token) return res.status(401).json({ error: "Missing Bearer token" });
+    if (!token) {
+      logBootstrapAuth(req, {
+        phase: 'missing-bearer-token',
+        durationMs: Date.now() - authStartedAt,
+      });
+      return res.status(401).json({ error: "Missing Bearer token" });
+    }
 
     try {
       const payload = await verifyToken(token, { secretKey: ENV.CLERK_SECRET_KEY });
       const clerkId = payload?.sub;
       if (!clerkId) {
+        logBootstrapAuth(req, {
+          phase: 'invalid-payload',
+          durationMs: Date.now() - authStartedAt,
+        });
         return res.status(401).json({ error: "Invalid auth token payload" });
       }
 
       req.auth = { clerkId, sessionClaims: payload };
+      logBootstrapAuth(req, {
+        phase: 'verify-success',
+        durationMs: Date.now() - authStartedAt,
+        clerkId,
+      });
       return next();
     } catch (verifyError) {
       if (devFallbackAllowed && fallbackClerkId) {
         console.warn("Clerk verify failed in dev. Falling back to clerkId header/body/params.");
         req.auth = { clerkId: fallbackClerkId, sessionClaims: null, insecureFallback: true };
+        logBootstrapAuth(req, {
+          phase: 'dev-fallback-after-verify-error',
+          durationMs: Date.now() - authStartedAt,
+          fallbackClerkId,
+          error: verifyError?.message || 'Unknown verify error',
+        });
         return next();
       }
+      logBootstrapAuth(req, {
+        phase: 'verify-error',
+        durationMs: Date.now() - authStartedAt,
+        error: verifyError?.message || 'Unknown verify error',
+      });
       console.error("Clerk auth verify error:", verifyError);
       return res.status(401).json({ error: "Unauthorized" });
     }
   } catch (error) {
+    logBootstrapAuth(req, {
+      phase: 'auth-exception',
+      durationMs: Date.now() - authStartedAt,
+      error: error?.message || 'Unknown auth exception',
+    });
     console.error("Clerk auth error:", error);
     return res.status(401).json({ error: "Unauthorized" });
   }

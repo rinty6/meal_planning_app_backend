@@ -46,6 +46,17 @@ userRoutes.post('/sync', async (req, res) => {
 )
 
 userRoutes.post('/bootstrap', requireClerkAuth, async (req, res) => {
+    const startedAt = Date.now();
+    const requestPath = req.originalUrl || req.url || '/api/users/bootstrap';
+
+    // Log the bootstrap entry so stalled requests are visible in Railway logs.
+    logUserBootstrap({
+        level: 'info',
+        phase: 'start',
+        path: requestPath,
+        clerkId: req.auth?.clerkId || null,
+    });
+
     try {
         const clerkId = req.auth?.clerkId;
         const bootstrapResult = await bootstrapUserFromClerkId(clerkId);
@@ -53,7 +64,10 @@ userRoutes.post('/bootstrap', requireClerkAuth, async (req, res) => {
         if (!bootstrapResult.ok) {
             logUserBootstrap({
                 level: "warn",
+                phase: 'complete',
+                path: requestPath,
                 clerkId,
+                durationMs: Date.now() - startedAt,
                 status: bootstrapResult.status || 500,
                 code: bootstrapResult.code || "USER_BOOTSTRAP_FAILED",
                 error: bootstrapResult.error,
@@ -67,7 +81,10 @@ userRoutes.post('/bootstrap', requireClerkAuth, async (req, res) => {
 
         logUserBootstrap({
             level: "info",
+            phase: 'complete',
+            path: requestPath,
             clerkId,
+            durationMs: Date.now() - startedAt,
             action: bootstrapResult.action,
             email: bootstrapResult.identity?.email || null,
             hasOnboarded: bootstrapResult.hasOnboarded,
@@ -80,6 +97,14 @@ userRoutes.post('/bootstrap', requireClerkAuth, async (req, res) => {
             hasOnboarded: bootstrapResult.hasOnboarded,
         });
     } catch (error) {
+        logUserBootstrap({
+            level: 'error',
+            phase: 'exception',
+            path: requestPath,
+            clerkId: req.auth?.clerkId || null,
+            durationMs: Date.now() - startedAt,
+            error: error?.message || 'Unknown bootstrap exception',
+        });
         console.error("Error bootstrapping user:", error);
         return res.status(500).json({
             error: "Internal server error",
