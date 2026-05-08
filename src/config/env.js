@@ -8,4 +8,7 @@ export const ENV = {
   DB_URL: process.env.DB_URL,
   NODE_ENV: process.env.NODE_ENV || 'development',
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || '',
+  EMAIL_USER: process.env.EMAIL_USER || '',
+  EMAIL_PASSWORD: process.env.EMAIL_PASSWORD || '',
+  FEEDBACK_TO_EMAIL: process.env.FEEDBACK_TO_EMAIL || 'duongphuthinh2001@gmail.com',
 };
