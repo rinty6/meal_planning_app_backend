@@ -556,6 +556,68 @@ export const getRecipeDetails = async (recipeId, options = {}) => {
   }
 };
 
+// Cache title -> imageUrl across recommendation requests so repeated foods cost zero FatSecret calls.
+const titleImageCache = new Map();
+const TITLE_IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const TITLE_IMAGE_LOOKUP_TIMEOUT_MS = 800;
+const TITLE_IMAGE_ENRICH_MAX_PARALLEL = 12;
+
+export const lookupImageForTitle = async (title) => {
+  const key = normalizeWord(title);
+  if (!key) return null;
+
+  const cached = titleImageCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  let value = null;
+  try {
+    const lookup = searchFoodItems(title, 1);
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), TITLE_IMAGE_LOOKUP_TIMEOUT_MS));
+    const result = await Promise.race([lookup, timeout]);
+    const items = Array.isArray(result) ? result : [];
+    const found = items.find((item) => typeof item?.image === "string" && item.image.startsWith("http"));
+    value = found?.image || null;
+  } catch {
+    value = null;
+  }
+
+  titleImageCache.set(key, { value, expiresAt: Date.now() + TITLE_IMAGE_CACHE_TTL_MS });
+  return value;
+};
+
+// Walks a recommendations-by-meal payload and fills missing image fields via FatSecret search.
+export const enrichRecommendationImages = async (recommendationsByMeal) => {
+  if (!recommendationsByMeal || typeof recommendationsByMeal !== "object") return recommendationsByMeal;
+
+  const targets = [];
+  for (const mealType of Object.keys(recommendationsByMeal)) {
+    const list = ensureArray(recommendationsByMeal[mealType]);
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!entry.image && entry.title) targets.push(entry);
+      const subItems = ensureArray(entry.items);
+      for (const sub of subItems) {
+        if (sub && typeof sub === "object" && !sub.image && sub.title) targets.push(sub);
+      }
+    }
+  }
+
+  if (targets.length === 0) return recommendationsByMeal;
+
+  // Bound parallelism so a single recommendation response never burns the FatSecret quota or stalls the route.
+  const slice = targets.slice(0, TITLE_IMAGE_ENRICH_MAX_PARALLEL);
+  await Promise.all(
+    slice.map(async (entry) => {
+      const image = await lookupImageForTitle(entry.title);
+      if (image) entry.image = image;
+    })
+  );
+
+  return recommendationsByMeal;
+};
+
 export const getDetailedMacros = async (foodIds = []) => {
   const uniqueIds = uniqueStrings(ensureArray(foodIds)).slice(0, 25);
   if (uniqueIds.length === 0) return {};

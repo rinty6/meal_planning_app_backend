@@ -4,8 +4,12 @@ import { eq, or } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { ENV } from "../config/env.js";
 import { demographicsTable, usersTable } from "../db/schema.js";
+import { createSingleFlight } from "../utils/singleFlight.js";
 
 let clerkClientInstance = null;
+const runBootstrapSingleFlight = createSingleFlight({
+  normalizeKey: (value) => cleanText(value),
+});
 
 export const cleanText = (value) => String(value ?? "").trim();
 
@@ -352,7 +356,7 @@ export const resolveClerkIdentity = async (clerkId) => {
   }
 };
 
-export const bootstrapUserFromClerkId = async (clerkId) => {
+const loadBootstrapUserFromClerkId = async (clerkId) => {
   const identityResult = await resolveClerkIdentity(clerkId);
   if (!identityResult.ok) {
     return identityResult;
@@ -376,4 +380,8 @@ export const bootstrapUserFromClerkId = async (clerkId) => {
     identity: identityResult.identity,
     hasOnboarded,
   };
+};
+
+export const bootstrapUserFromClerkId = async (clerkId) => {
+  return runBootstrapSingleFlight(clerkId, () => loadBootstrapUserFromClerkId(clerkId));
 };

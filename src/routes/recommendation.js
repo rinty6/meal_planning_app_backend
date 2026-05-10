@@ -17,6 +17,7 @@ import {
   toNumber,
 } from "./recommendation/helpers.js";
 import { buildRecommendationResponsePayload } from "./recommendation/responseBuilder.js";
+import { enrichRecommendationImages } from "../services/mealAPI.js";
 
 const recommendationRoutes = express.Router();
 const RECOMMENDATION_DEBUG_LOGS = process.env.RECOMMENDATION_DEBUG_LOGS === "1";
@@ -115,6 +116,13 @@ recommendationRoutes.get("/:clerkId", async (req, res) => {
           );
         });
       }
+    }
+
+    // Backfill missing image URLs via FatSecret search (cached). off.db has no image column, so combos arrive imageless.
+    try {
+      await enrichRecommendationImages(routePayload?.recommendationsByMeal);
+    } catch (enrichError) {
+      console.warn("Recommendation image enrichment failed (non-fatal):", enrichError?.message || enrichError);
     }
 
     return res.json(routePayload);
