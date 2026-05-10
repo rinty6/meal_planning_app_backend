@@ -15,8 +15,8 @@ const { encode } = pkg;
 
 const CLIENT_ID = process.env.FATSECRET_CLIENT_ID;
 const CLIENT_SECRET = process.env.FATSECRET_CLIENT_SECRET;
-const OAUTH_URL = "https://oauth.fatsecret.com/connect/token";
-const API_URL = "https://platform.fatsecret.com/rest/server.api";
+const OAUTH_URL = "https://goodhealthmate-fs.fly.dev/connect/token";
+const API_URL = "https://goodhealthmate-fs.fly.dev/rest/server.api";
 
 const TOKEN_REFRESH_BUFFER_MS = 30 * 1000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
