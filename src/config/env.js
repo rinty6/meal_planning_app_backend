@@ -11,4 +11,6 @@ export const ENV = {
   EMAIL_USER: process.env.EMAIL_USER || '',
   EMAIL_PASSWORD: process.env.EMAIL_PASSWORD || '',
   FEEDBACK_TO_EMAIL: process.env.FEEDBACK_TO_EMAIL || 'duongphuthinh2001@gmail.com',
+  RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+  FEEDBACK_FROM_EMAIL: process.env.FEEDBACK_FROM_EMAIL || '',
 };
