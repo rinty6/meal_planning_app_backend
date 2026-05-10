@@ -1,9 +1,15 @@
 // This file handles user feedback submissions and sends them via email
 import express from "express";
+import dns from "node:dns/promises";
 import nodemailer from "nodemailer";
 import { ENV } from "../config/env.js";
 
 const feedbackRoutes = express.Router();
+const FEEDBACK_SMTP_HOST = "smtp.gmail.com";
+const FEEDBACK_SMTP_PORT = 465;
+const FEEDBACK_SMTP_CONNECTION_TIMEOUT_MS = 8_000;
+const FEEDBACK_SMTP_GREETING_TIMEOUT_MS = 8_000;
+const FEEDBACK_SMTP_SOCKET_TIMEOUT_MS = 15_000;
 
 // Normalize feedback mail settings so configuration failures are explicit.
 const getFeedbackMailConfig = () => ({
@@ -12,14 +18,36 @@ const getFeedbackMailConfig = () => ({
   recipient: ENV.FEEDBACK_TO_EMAIL.trim(),
 });
 
-// Create the transporter from current env-backed settings for each send attempt.
-const createFeedbackTransporter = ({ sender, password }) => nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: sender,
-    pass: password,
-  },
-});
+const resolveFeedbackSmtpHost = async () => {
+  try {
+    const addresses = await dns.resolve4(FEEDBACK_SMTP_HOST);
+    return addresses[0] || FEEDBACK_SMTP_HOST;
+  } catch {
+    return FEEDBACK_SMTP_HOST;
+  }
+};
+
+// Resolve Gmail to IPv4 first so Railway does not get stuck on unreachable IPv6 SMTP addresses.
+const createFeedbackTransporter = async ({ sender, password }) => {
+  const resolvedHost = await resolveFeedbackSmtpHost();
+
+  return nodemailer.createTransport({
+    host: resolvedHost,
+    port: FEEDBACK_SMTP_PORT,
+    secure: true,
+    auth: {
+      user: sender,
+      pass: password,
+    },
+    connectionTimeout: FEEDBACK_SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: FEEDBACK_SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: FEEDBACK_SMTP_SOCKET_TIMEOUT_MS,
+    dnsTimeout: 5_000,
+    tls: {
+      servername: FEEDBACK_SMTP_HOST,
+    },
+  });
+};
 
 // ENDPOINT: POST /api/feedback/submit
 feedbackRoutes.post('/submit', async (req, res) => {
@@ -78,7 +106,7 @@ feedbackRoutes.post('/submit', async (req, res) => {
     }
 
     // Send email
-    const transporter = createFeedbackTransporter(mailConfig);
+    const transporter = await createFeedbackTransporter(mailConfig);
     const info = await transporter.sendMail(mailOptions);
     
     return res.status(200).json({ 
@@ -94,6 +122,24 @@ feedbackRoutes.post('/submit', async (req, res) => {
       return res.status(503).json({
         error: "Feedback email login was rejected by Gmail. Update EMAIL_USER and EMAIL_PASSWORD with a valid Gmail app password.",
         code: "FEEDBACK_EMAIL_AUTH_FAILED",
+      });
+    }
+
+    if (error?.code === 'ETIMEDOUT') {
+      return res.status(503).json({
+        error: "Feedback email service timed out while connecting to Gmail from the backend. Please try again later.",
+        code: "FEEDBACK_EMAIL_TIMEOUT",
+      });
+    }
+
+    if (
+      error?.code === 'ESOCKET' ||
+      error?.code === 'ENETUNREACH' ||
+      error?.code === 'ECONNECTION'
+    ) {
+      return res.status(503).json({
+        error: "Feedback email service is unreachable from the backend right now. Please try again later.",
+        code: "FEEDBACK_EMAIL_CONNECTION_FAILED",
       });
     }
 
