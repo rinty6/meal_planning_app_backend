@@ -87,6 +87,12 @@ app.get('/', (req, res) => {
   res.status(200).json(buildHealthPayload());
 });
 
+// Answer browser favicon probes quietly so they do not pollute missing-route logs.
+app.get('/favicon.ico', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.status(204).end();
+});
+
 // Expose the privacy policy as a public page for App Store Connect.
 app.get(['/privacy-policy', '/privacy-policy/', '/privacy-policy.html'], (req, res) => {
   res.sendFile(privacyPolicyFilePath);
