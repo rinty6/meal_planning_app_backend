@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 import { ENV } from './config/env.js';
 import job from './config/cron.js';
@@ -25,6 +27,9 @@ const app = express();
 const PORT = ENV.PORT || 3000;
 const MISSING_ROUTE_LOG_WINDOW_MS = 15 * 60 * 1000;
 const recentMissingRouteLogs = new Map();
+const currentFilePath = fileURLToPath(import.meta.url);
+const currentDirPath = path.dirname(currentFilePath);
+const privacyPolicyFilePath = path.resolve(currentDirPath, '../../privacy_policy/index.html');
 
 const bytesToMb = (value) => Math.round((Number(value || 0) / (1024 * 1024)) * 100) / 100;
 
@@ -79,6 +84,11 @@ app.use(express.json());
 // Serve a stable root response so platform probes do not fail on `/`.
 app.get('/', (req, res) => {
   res.status(200).json(buildHealthPayload());
+});
+
+// Expose the privacy policy as a public page for App Store Connect.
+app.get(['/privacy-policy', '/privacy-policy/', '/privacy-policy.html'], (req, res) => {
+  res.sendFile(privacyPolicyFilePath);
 });
 
 // Mirror the health response on a generic path used by some hosting probes.
