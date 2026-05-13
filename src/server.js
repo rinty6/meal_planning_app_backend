@@ -29,7 +29,8 @@ const MISSING_ROUTE_LOG_WINDOW_MS = 15 * 60 * 1000;
 const recentMissingRouteLogs = new Map();
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirPath = path.dirname(currentFilePath);
-const privacyPolicyFilePath = path.resolve(currentDirPath, '../../privacy_policy/index.html');
+// Keep the hosted privacy policy inside the backend repo so Railway deploys it with the service.
+const privacyPolicyFilePath = path.resolve(currentDirPath, '../privacy_policy/index.html');
 
 const bytesToMb = (value) => Math.round((Number(value || 0) / (1024 * 1024)) * 100) / 100;
 

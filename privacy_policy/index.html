@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GoodHealthMate Privacy Policy</title>
+    <meta
+      name="description"
+      content="Privacy Policy for the GoodHealthMate mobile application and related services."
+    />
+    <style>
+      :root {
+        --bg: #f6f1e8;
+        --panel: rgba(255, 252, 246, 0.88);
+        --panel-strong: #fffaf2;
+        --text: #223026;
+        --muted: #5f6d61;
+        --accent: #2f6b53;
+        --accent-soft: #d6eadf;
+        --border: rgba(34, 48, 38, 0.12);
+        --shadow: 0 24px 60px rgba(34, 48, 38, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Georgia", "Palatino Linotype", "Book Antiqua", ui-serif, serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(105, 165, 134, 0.2), transparent 32%),
+          radial-gradient(circle at top right, rgba(245, 182, 112, 0.18), transparent 28%),
+          linear-gradient(180deg, #f7f2e8 0%, #efe8dc 100%);
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      .shell {
+        width: min(1120px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0 72px;
+      }
+
+      .hero {
+        background: linear-gradient(135deg, rgba(255, 250, 242, 0.96), rgba(247, 241, 232, 0.92));
+        border: 1px solid var(--border);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .hero-inner {
+        padding: 40px 28px 28px;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        font-size: 0.88rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.4rem, 5vw, 4.5rem);
+        line-height: 0.95;
+      }
+
+      .subtitle {
+        margin: 18px 0 0;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 1.02rem;
+        line-height: 1.7;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 28px;
+      }
+
+      .meta-card {
+        padding: 16px 18px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.6);
+      }
+
+      .meta-label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .meta-value {
+        margin: 0;
+        font-size: 1rem;
+        line-height: 1.5;
+      }
+
+      .notice {
+        margin-top: 22px;
+        padding: 16px 18px;
+        border-left: 4px solid var(--accent);
+        border-radius: 16px;
+        background: var(--accent-soft);
+        color: #1f3b2e;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: 22px;
+        margin-top: 24px;
+      }
+
+      .toc,
+      .content {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(10px);
+      }
+
+      .toc {
+        position: sticky;
+        top: 20px;
+        align-self: start;
+        padding: 22px;
+      }
+
+      .toc h2,
+      .content h2 {
+        margin: 0 0 14px;
+        font-size: 1.15rem;
+      }
+
+      .toc ol {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .toc li + li {
+        margin-top: 10px;
+      }
+
+      .toc a {
+        text-decoration: none;
+      }
+
+      .content {
+        padding: 28px;
+      }
+
+      .section + .section {
+        margin-top: 30px;
+        padding-top: 30px;
+        border-top: 1px solid var(--border);
+      }
+
+      .section h3 {
+        margin: 0 0 12px;
+        font-size: 1.5rem;
+      }
+
+      .section p,
+      .section li {
+        font-size: 1rem;
+        line-height: 1.8;
+        color: #28362b;
+      }
+
+      .section ul {
+        margin: 12px 0 0;
+        padding-left: 20px;
+      }
+
+      .section li + li {
+        margin-top: 10px;
+      }
+
+      .placeholder {
+        font-weight: 700;
+        color: #854d0e;
+        background: rgba(245, 182, 112, 0.22);
+        padding: 2px 6px;
+        border-radius: 999px;
+      }
+
+      .footer {
+        margin-top: 24px;
+        padding: 20px 24px;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        background: var(--panel-strong);
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.7;
+      }
+
+      @media (max-width: 900px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .toc {
+          position: static;
+        }
+
+        .meta-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100vw - 18px, 1120px);
+          padding-top: 12px;
+        }
+
+        .hero-inner,
+        .content,
+        .toc {
+          padding: 22px 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Standalone privacy policy page that can be hosted as static HTML. -->
+    <div class="shell">
+      <header class="hero">
+        <div class="hero-inner">
+          <p class="eyebrow">GoodHealthMate</p>
+          <h1>Privacy Policy</h1>
+          <p class="subtitle">
+            This Privacy Policy explains how GoodHealthMate, operated by Phu Thinh Duong,
+            collects, uses, stores, and shares information when you use the GoodHealthMate mobile
+            app and related meal-planning, recommendation, notification, and food-recognition
+            services.
+          </p>
+
+          <div class="meta-grid">
+            <div class="meta-card">
+              <span class="meta-label">Last Updated</span>
+              <p class="meta-value">May 13, 2026</p>
+            </div>
+            <div class="meta-card">
+              <span class="meta-label">Tracking</span>
+              <p class="meta-value">We do not use your personal information for cross-app tracking or targeted advertising.</p>
+            </div>
+            <div class="meta-card">
+              <span class="meta-label">Contact</span>
+              <p class="meta-value">duongphuthinh2001@gmail.com</p>
+            </div>
+          </div>
+
+          <div class="notice">
+            This version uses the current operator name and support email you provided. Review the
+            text once more before publishing in case you want to add jurisdiction-specific legal
+            details later.
+          </div>
+        </div>
+      </header>
+
+      <div class="layout">
+        <nav class="toc" aria-label="Table of contents">
+          <h2>Contents</h2>
+          <ol>
+            <li><a href="#scope">Who This Policy Covers</a></li>
+            <li><a href="#collect">Information We Collect</a></li>
+            <li><a href="#use">How We Use Information</a></li>
+            <li><a href="#share">When We Share Information</a></li>
+            <li><a href="#tracking">Tracking and Advertising</a></li>
+            <li><a href="#retention">How Long We Keep Information</a></li>
+            <li><a href="#choices">Your Choices and Rights</a></li>
+            <li><a href="#security">Security</a></li>
+            <li><a href="#children">Children's Privacy</a></li>
+            <li><a href="#transfers">International Transfers</a></li>
+            <li><a href="#changes">Changes to This Policy</a></li>
+            <li><a href="#contact">Contact Us</a></li>
+          </ol>
+        </nav>
+
+        <main class="content">
+          <section class="section" id="scope">
+            <h3>1. Who This Policy Covers</h3>
+            <p>
+              This Privacy Policy applies to the GoodHealthMate mobile application and related
+              services operated by Phu Thinh Duong, including connected meal-planning,
+              recommendation, feedback, notification, and food-recognition features that link to
+              this policy.
+            </p>
+            <p>
+              If you use third-party sign-in, nutrition lookup, or notification providers through
+              the app, those providers may also process your information under their own privacy
+              terms. This policy describes our handling of information within the GoodHealthMate
+              service.
+            </p>
+          </section>
+
+          <section class="section" id="collect">
+            <h3>2. Information We Collect</h3>
+            <p>We collect information you provide directly, information created through your use of the app, and limited technical data needed to operate the service.</p>
+            <ul>
+              <li>
+                <strong>Account and identity information.</strong> When you create or use an
+                account, we collect information such as your name, email address, authentication
+                identifiers, and account profile details.
+              </li>
+              <li>
+                <strong>Profile and health-related information.</strong> We collect data such as
+                height, weight, preferred measurement units, gender, date of birth, activity level,
+                nutrition goals, and calorie-goal settings to personalize meal planning and related
+                recommendations.
+              </li>
+              <li>
+                <strong>Meal-planning and saved-content information.</strong> We collect meal logs,
+                saved recipes, favorites, shopping lists, shopping-list items, in-app notification
+                history, and recommendation feedback you submit inside the app.
+              </li>
+              <li>
+                <strong>Food photos and correction submissions.</strong> If you use food recognition
+                or submit a correction for a wrong prediction, we may receive and process food
+                images, predicted labels, corrected labels, and related feedback. Correction images
+                may be retained to improve the quality and reviewability of the feature.
+              </li>
+              <li>
+                <strong>Support and feedback information.</strong> If you contact us or submit
+                feedback, we collect the content of your message, your email address, your account
+                identifier if provided, and any optional attachments such as screenshots or photos.
+              </li>
+              <li>
+                <strong>Notification and device information.</strong> If you enable push
+                notifications, we collect your push token and basic device platform information
+                needed to deliver notifications to your device.
+              </li>
+              <li>
+                <strong>Request-scoped inputs.</strong> We process search terms, barcode inputs,
+                recipe lookups, and similar request data when you use those features. We do not
+                currently present a separate stored search-history feature in the app build audited
+                for this policy.
+              </li>
+            </ul>
+          </section>
+
+          <section class="section" id="use">
+            <h3>3. How We Use Information</h3>
+            <p>We use personal information to operate, maintain, and improve GoodHealthMate.</p>
+            <ul>
+              <li>To create and manage your account, authenticate you, and keep your profile in sync.</li>
+              <li>To log meals, manage calorie goals, store saved recipes, favorites, and shopping lists.</li>
+              <li>To personalize meal recommendations using your profile, goals, favorites, and feedback.</li>
+              <li>To process food-recognition requests and review or improve correction submissions.</li>
+              <li>To deliver push notifications and render your in-app notification inbox.</li>
+              <li>To respond to customer support and product feedback submissions.</li>
+              <li>To secure the service, diagnose operational issues, and comply with legal obligations.</li>
+            </ul>
+          </section>
+
+          <section class="section" id="share">
+            <h3>4. When We Share Information</h3>
+            <p>
+              We do not sell your personal information. We share information only when needed to
+              provide the service, comply with the law, or protect rights and safety.
+            </p>
+            <ul>
+              <li>
+                <strong>Authentication providers.</strong> We use Clerk and related authentication
+                services to create and manage user accounts and sign-in sessions.
+              </li>
+              <li>
+                <strong>Infrastructure and service providers.</strong> We use hosting, database,
+                storage, email, and backend infrastructure providers to run the app and its related
+                services.
+              </li>
+              <li>
+                <strong>Notification providers.</strong> If you enable push notifications, your
+                push token is processed through the notification services needed to deliver alerts.
+              </li>
+              <li>
+                <strong>Support providers.</strong> Feedback submissions may be delivered through
+                email providers such as Resend, Gmail SMTP, or another configured email service.
+              </li>
+              <li>
+                <strong>Food and nutrition services.</strong> If you use food lookup or similar
+                features, relevant request data may be sent to the third-party food or nutrition
+                service used to return those results, such as the FatSecret platform integration
+                used by the app.
+              </li>
+              <li>
+                <strong>Recommendation and food-recognition processing.</strong> Profile, meal, and
+                feedback data may be processed by our recommendation or food-recognition services so
+                the app can return personalized results or image classifications.
+              </li>
+              <li>
+                <strong>Legal and safety disclosures.</strong> We may disclose information if
+                required by law or if reasonably necessary to protect users, the service, or the
+                public.
+              </li>
+            </ul>
+          </section>
+
+          <section class="section" id="tracking">
+            <h3>5. Tracking and Advertising</h3>
+            <p>
+              GoodHealthMate does not use your name, email, user profile, device information, or
+              other personal information for third-party tracking, cross-app tracking, data-broker
+              sharing, or targeted advertising.
+            </p>
+            <p>
+              In the app build audited for this policy, we did not identify third-party ad SDKs,
+              cross-app tracking SDKs, or App Tracking Transparency flows in the mobile app or
+              backend package manifests reviewed on May 13, 2026.
+            </p>
+          </section>
+
+          <section class="section" id="retention">
+            <h3>6. How Long We Keep Information</h3>
+            <p>
+              We keep information for as long as reasonably necessary to provide the service,
+              maintain records, comply with legal obligations, resolve disputes, and improve the
+              product.
+            </p>
+            <ul>
+              <li>Account and profile information is generally retained while your account remains active.</li>
+              <li>Meal logs, saved recipes, favorites, calorie goals, shopping lists, and recommendation feedback are retained until deleted, overwritten, or no longer needed for the service.</li>
+              <li>Push tokens may be retained until they are refreshed, invalidated, or removed from your account.</li>
+              <li>Feedback emails and attachments may be retained for support, troubleshooting, and product-improvement records.</li>
+              <li>Food-recognition correction images and related logs may be retained in feedback storage until they are manually removed or no longer needed for review and improvement.</li>
+              <li>Backups and short-lived logs may continue to exist for a limited period after deletion requests are processed.</li>
+            </ul>
+          </section>
+
+          <section class="section" id="choices">
+            <h3>7. Your Choices and Rights</h3>
+            <p>
+              Depending on where you live, you may have rights to access, correct, delete, or
+              export personal information we hold about you.
+            </p>
+            <ul>
+              <li>You can update some account and profile details inside the app.</li>
+              <li>You can disable push notifications in your device settings or inside app settings where available.</li>
+              <li>You can request access, correction, export, or deletion by contacting us at duongphuthinh2001@gmail.com.</li>
+              <li>If you want us to review a privacy request, please include enough information for us to verify your account and understand the request.</li>
+            </ul>
+          </section>
+
+          <section class="section" id="security">
+            <h3>8. Security</h3>
+            <p>
+              We use reasonable administrative, technical, and organizational measures designed to
+              protect personal information. No method of transmission or storage is completely
+              secure, so we cannot guarantee absolute security.
+            </p>
+          </section>
+
+          <section class="section" id="children">
+            <h3>9. Children's Privacy</h3>
+            <p>
+              GoodHealthMate is not intended for children under the age of 13, or a higher minimum
+              age where required by local law, unless a parent or guardian has authorized use where
+              legally permitted. If you believe a child has provided personal information to us in
+              violation of this section, contact us at duongphuthinh2001@gmail.com.
+            </p>
+          </section>
+
+          <section class="section" id="transfers">
+            <h3>10. International Transfers</h3>
+            <p>
+              Your information may be processed in countries other than the one where you live,
+              including countries where our service providers operate. Where required by applicable
+              law, we rely on appropriate safeguards for such transfers.
+            </p>
+          </section>
+
+          <section class="section" id="changes">
+            <h3>11. Changes to This Policy</h3>
+            <p>
+              We may update this Privacy Policy from time to time. If we make material changes, we
+              will update the date at the top of this page and may provide additional notice inside
+              the app or through other reasonable means.
+            </p>
+          </section>
+
+          <section class="section" id="contact">
+            <h3>12. Contact Us</h3>
+            <p>
+              GoodHealthMate is operated by Phu Thinh Duong. If you have questions, support
+              requests, or privacy requests, contact us at duongphuthinh2001@gmail.com.
+            </p>
+          </section>
+        </main>
+      </div>
+
+      <div class="footer">
+        This page is designed to be hosted as a static file for App Store Connect or other release
+        requirements. The safest next step is to replace the placeholders with your real contact
+        details, host this file at a public URL, and use that URL as your Privacy Policy URL.
+      </div>
+    </div>
+  </body>
+</html>
