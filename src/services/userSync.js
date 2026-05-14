@@ -357,6 +357,32 @@ export const resolveClerkIdentity = async (clerkId) => {
 };
 
 const loadBootstrapUserFromClerkId = async (clerkId) => {
+  const normalizedClerkId = cleanText(clerkId);
+
+  // Fast path: returning users already exist in the DB. Skip the Clerk API
+  // round trip and answer the bootstrap straight from Postgres. Clerk identity
+  // changes (email/username) are reconciled by the profile edit flow, not by
+  // every startup bootstrap.
+  if (normalizedClerkId) {
+    const existingUser = await getUserByClerkId(normalizedClerkId);
+    if (existingUser) {
+      const hasOnboarded = await getHasOnboarded(existingUser.userId);
+      return {
+        ok: true,
+        status: 200,
+        action: "existing",
+        user: existingUser,
+        identity: {
+          clerkId: existingUser.clerkId,
+          email: existingUser.email,
+          username: existingUser.username,
+        },
+        hasOnboarded,
+      };
+    }
+  }
+
+  // Slow path: first-time users — resolve identity from Clerk and insert.
   const identityResult = await resolveClerkIdentity(clerkId);
   if (!identityResult.ok) {
     return identityResult;
