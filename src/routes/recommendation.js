@@ -18,10 +18,24 @@ import {
 } from "./recommendation/helpers.js";
 import { buildRecommendationResponsePayload } from "./recommendation/responseBuilder.js";
 import { enrichRecommendationImages } from "../services/mealAPI.js";
+import { createTtlCache } from "../utils/ttlCache.js";
 
 const recommendationRoutes = express.Router();
 const RECOMMENDATION_DEBUG_LOGS = process.env.RECOMMENDATION_DEBUG_LOGS === "1";
 const FROZEN_REPLAY_ROUTE_DISABLED = process.env.NODE_ENV === "production";
+
+// Per-user recommendation cache. The full route response (ML output +
+// FatSecret image enrichment) is reused for 5 minutes per (clerkId, mealType).
+// `force_exploration` bypasses the cache so users explicitly asking for new
+// suggestions never see a stale set.
+const RECOMMENDATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const recommendationResponseCache = createTtlCache({
+  ttlMs: RECOMMENDATION_CACHE_TTL_MS,
+  maxEntries: 2000,
+});
+
+const buildRecommendationCacheKey = ({ clerkId, mealType }) =>
+  `${clerkId}|${mealType || "all"}`;
 
 const normalizeSnapshotMealType = (mealType) => {
   const normalizedMealType = String(mealType || "").trim().toLowerCase();
@@ -34,6 +48,17 @@ recommendationRoutes.get("/:clerkId", async (req, res) => {
     const { clerkId } = req.params;
     const selectedMealType = getMealTypeFromQuery(req.query.mealType);
     const forceExploration = parseBool(req.query.force_exploration) || parseBool(req.query.forceExploration);
+
+    // Reuse the last computed payload for this user + mealType when the caller is
+    // not explicitly asking for fresh exploration. The route is otherwise dominated
+    // by an ML round trip plus FatSecret image enrichment.
+    const cacheKey = buildRecommendationCacheKey({ clerkId, mealType: selectedMealType });
+    if (!forceExploration) {
+      const cached = recommendationResponseCache.get(cacheKey);
+      if (cached) {
+        return res.json(cached);
+      }
+    }
 
     const user = await getUserByClerkId(clerkId);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -123,6 +148,13 @@ recommendationRoutes.get("/:clerkId", async (req, res) => {
       await enrichRecommendationImages(routePayload?.recommendationsByMeal);
     } catch (enrichError) {
       console.warn("Recommendation image enrichment failed (non-fatal):", enrichError?.message || enrichError);
+    }
+
+    // Cache the final enriched payload so the next hit within the TTL skips the
+    // ML round trip and the FatSecret enrichment entirely. Exploration requests
+    // never write to the cache (the user asked for fresh output).
+    if (!forceExploration) {
+      recommendationResponseCache.set(cacheKey, routePayload);
     }
 
     return res.json(routePayload);

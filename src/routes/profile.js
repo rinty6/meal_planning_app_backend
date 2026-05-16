@@ -34,6 +34,10 @@ profileRoutes.get("/:clerkId", async (req, res) => {
              profileData.age = "N/A"; // Failsafe
         }
 
+        // Let the iOS NSURLCache serve repeated profile reads from the device
+        // for a short window. Same-device edits update the in-memory cache
+        // synchronously, so this only shortens cross-device / cold-cache reads.
+        res.set("Cache-Control", "private, max-age=30");
         res.json({
             user: user[0],
             demographics: profileData

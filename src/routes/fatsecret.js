@@ -11,6 +11,13 @@ import {
 const fatSecretRoutes = express.Router();
 const DEFAULT_RECIPE_SEARCH_QUERY = "healthy";
 
+// Food/recipe detail rows in FatSecret are effectively immutable, so iOS
+// NSURLCache can hold them for a full day. Search results can change over time
+// but rarely within minutes — a 10-minute window safely absorbs repeated
+// keystrokes and rapid screen revisits without serving stale data.
+const FOOD_DETAIL_CACHE_HEADER = "public, max-age=86400";
+const SEARCH_RESULT_CACHE_HEADER = "public, max-age=600";
+
 const parseMaxResults = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -36,6 +43,7 @@ fatSecretRoutes.get("/foods/search", async (req, res) => {
     }
 
     const items = await searchFoodItems(query, maxResults, { throwOnError: true });
+    res.set("Cache-Control", SEARCH_RESULT_CACHE_HEADER);
     return res.status(200).json({ items });
   } catch (error) {
     console.error("FatSecret food search route error:", error);
@@ -59,6 +67,7 @@ fatSecretRoutes.get("/foods/:foodId", async (req, res) => {
       return res.status(404).json({ error: "Food item not found." });
     }
 
+    res.set("Cache-Control", FOOD_DETAIL_CACHE_HEADER);
     return res.status(200).json({ item });
   } catch (error) {
     console.error("FatSecret food detail route error:", error);
@@ -74,6 +83,7 @@ fatSecretRoutes.get("/recipes/search", async (req, res) => {
     const maxResults = parseMaxResults(req.query.maxResults, 15);
 
     const items = await searchRecipes(query, maxResults, { throwOnError: true });
+    res.set("Cache-Control", SEARCH_RESULT_CACHE_HEADER);
     return res.status(200).json({ items });
   } catch (error) {
     console.error("FatSecret recipe search route error:", error);
@@ -93,6 +103,7 @@ fatSecretRoutes.get("/recipes/:recipeId", async (req, res) => {
       return res.status(404).json({ error: "Recipe not found." });
     }
 
+    res.set("Cache-Control", FOOD_DETAIL_CACHE_HEADER);
     return res.status(200).json({ item });
   } catch (error) {
     console.error("FatSecret recipe detail route error:", error);
