@@ -6,6 +6,7 @@ import {
   calorieGoalsTable,
   demographicsTable,
   favouritesTable,
+  mealLogsTable,
   recommendationFeedbackTable,
   usersTable,
 } from "../../db/schema.js";
@@ -265,6 +266,12 @@ export const ensureRecommendationFeedbackStorage = async () => {
 };
 
 export const warmRecommendationRouteDependencies = async () => {
+  // Touching every table the app reads on first focus warms the Drizzle ORM
+  // metadata + the Postgres connection pool for those tables. Without this,
+  // the FIRST request that hits a previously-untouched table on a fresh
+  // Railway container can stall for several seconds (see Error 016 follow-up:
+  // /api/meals/summary spent ~5 s on cold first hit even though the route is
+  // a single SELECT).
   const warmupTasks = [
     ensureRecommendationFeedbackTable(),
     db.execute(sql`SELECT 1`),
@@ -272,6 +279,7 @@ export const warmRecommendationRouteDependencies = async () => {
     db.select({ userId: demographicsTable.userId }).from(demographicsTable).limit(1),
     db.select({ userId: calorieGoalsTable.userId }).from(calorieGoalsTable).limit(1),
     db.select({ userId: favouritesTable.userId }).from(favouritesTable).limit(1),
+    db.select({ userId: mealLogsTable.userId }).from(mealLogsTable).limit(1),
   ];
 
   const results = await Promise.allSettled(warmupTasks);
