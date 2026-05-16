@@ -15,6 +15,7 @@ import {
   ensureRecommendationFeedbackStorage,
   warmRecommendationRouteDependencies,
 } from './routes/recommendation/dataAccess.js';
+import { warmFatSecretCache } from './services/mealAPI.js';
 import profileRoutes from './routes/profile.js';
 import deviceRoutes from './routes/devices.js';
 import notificationRoutes from './routes/notifications.js';
@@ -148,6 +149,13 @@ void ensureRecommendationFeedbackStorage().catch((error) => {
 
 void warmRecommendationRouteDependencies().catch((error) => {
   console.error('Recommendation route warmup failed:', error);
+});
+
+// Eagerly fetch the FatSecret OAuth token and prime the in-process apiCache for
+// the "healthy" default search so the first real Recipe/Meal-Planning visit
+// after a deploy does not pay the cold-start latency captured in the logs.
+void warmFatSecretCache().catch((error) => {
+  console.error('FatSecret cache warmup failed:', error);
 });
 
 app.listen(PORT, () => {

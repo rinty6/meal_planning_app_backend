@@ -648,3 +648,40 @@ export const getDetailedMacros = async (foodIds = []) => {
 
   return output;
 };
+
+// On a cold Railway container the FatSecret OAuth token and apiCache are both
+// empty. The very first user request then pays the full cold path: one OAuth
+// round trip (~1.5 s) PLUS the actual FatSecret search call (~700 ms) PLUS any
+// follow-up detail/image-enrichment calls. The Railway log captured this as a
+// 4-second `/api/fatsecret/foods/search` on the first request after deploy
+// while subsequent calls dropped to 600-900 ms.
+//
+// UptimeRobot pings /api/health to keep the Node process alive, but /api/health
+// never exercises FatSecret, so the token and response caches stay cold until
+// a real user shows up. This warmup pre-fills both as soon as the server is
+// listening, so the first real Recipe-page visit hits a warm in-process cache
+// (~1 ms) instead of paying the cold path.
+//
+// All tasks are best-effort and run in parallel; a failure in any one task is
+// logged but never blocks server startup.
+export const warmFatSecretCache = async () => {
+  const startedAt = Date.now();
+  const warmupTasks = [
+    // Pre-fetch the OAuth token so it is cached for the first user request.
+    getAccessToken().catch((error) => {
+      console.warn("[mealAPI] FatSecret warmup: token fetch failed (non-fatal):", error?.message || error);
+    }),
+    // Prime the recipes.search cache for the default "healthy" query used by
+    // the Recipe tab on its initial load.
+    searchRecipes("healthy", 15).catch((error) => {
+      console.warn("[mealAPI] FatSecret warmup: recipes.search failed (non-fatal):", error?.message || error);
+    }),
+    // Prime the foods.search cache for the same default query.
+    searchFoodItems("healthy", 10).catch((error) => {
+      console.warn("[mealAPI] FatSecret warmup: foods.search failed (non-fatal):", error?.message || error);
+    }),
+  ];
+
+  await Promise.allSettled(warmupTasks);
+  console.log(`[mealAPI] FatSecret cache warmed in ${Date.now() - startedAt} ms`);
+};
