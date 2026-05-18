@@ -42,7 +42,8 @@ fatSecretRoutes.get("/foods/search", async (req, res) => {
       return res.status(400).json({ error: "Missing query parameter." });
     }
 
-    const items = await searchFoodItems(query, maxResults, { throwOnError: true });
+    const foodType = String(req.query.foodType || req.query.food_type || "").trim().toLowerCase();
+    const items = await searchFoodItems({ query, maxResults, foodType }, maxResults, { throwOnError: true });
     res.set("Cache-Control", SEARCH_RESULT_CACHE_HEADER);
     return res.status(200).json({ items });
   } catch (error) {

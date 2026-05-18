@@ -263,6 +263,7 @@ const normalizeSearchInput = (queryOrOptions, maxResults, defaultMax) => {
       retrieverKeywords,
       goal: queryOrOptions.goal || "maintain",
       mealType: queryOrOptions.mealType || "lunch",
+      foodType: String(queryOrOptions.foodType || queryOrOptions.food_type || "").trim().toLowerCase(),
       maxResults: Number.parseInt(queryOrOptions.maxResults, 10) || maxResults || defaultMax,
       expandQueries: queryOrOptions.expandQueries === true || retrieverKeywords.length > 0,
     };
@@ -273,9 +274,20 @@ const normalizeSearchInput = (queryOrOptions, maxResults, defaultMax) => {
     retrieverKeywords: [],
     goal: "maintain",
     mealType: "lunch",
+    foodType: "",
     maxResults: Number.parseInt(maxResults, 10) || defaultMax,
     expandQueries: false,
   };
+};
+
+const extractFoodSearchImage = (item) => {
+  if (!item) return null;
+  if (typeof item.food_image === "string") return item.food_image;
+  if (item.food_image?.image_url) return item.food_image.image_url;
+
+  const images = item.food_images?.food_image;
+  const imageArray = Array.isArray(images) ? images : images ? [images] : [];
+  return imageArray.find((image) => image?.image_url)?.image_url || null;
 };
 
 export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions = {}) => {
@@ -300,7 +312,15 @@ export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions
           include_food_images: "true",
         });
 
-        const data = await requestFatSecret(params);
+        let data = null;
+        try {
+          data = await requestFatSecret(params);
+        } catch {
+          const fallbackParams = new URLSearchParams(params);
+          fallbackParams.set("method", "foods.search");
+          fallbackParams.delete("food_type");
+          data = await requestFatSecret(fallbackParams);
+        }
         if (!data) return [];
 
         const recipes = ensureArray(data.recipes?.recipe);
@@ -349,23 +369,26 @@ export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptio
 
   const mappedResults = await Promise.all(
     queries.map(async (query) => {
-      const cacheKey = makeCacheKey("foods.search", [query, input.maxResults]);
+      const cacheKey = makeCacheKey("foods.search.v5", [query, input.maxResults, input.foodType]);
       const cached = getCached(cacheKey);
       if (cached) return cached;
 
       try {
         const params = new URLSearchParams({
-          method: "foods.search",
+          method: "foods.search.v5",
           search_expression: query,
           format: "json",
           max_results: String(input.maxResults),
           include_food_images: "true",
         });
+        if (input.foodType === "brand" || input.foodType === "generic") {
+          params.set("food_type", input.foodType);
+        }
 
         const data = await requestFatSecret(params);
         if (!data) return [];
 
-        const foods = ensureArray(data.foods?.food);
+        const foods = ensureArray(data.foods_search?.results?.food || data.foods?.food);
         const mapped = foods.map((item) => ({
           id: String(item.food_id),
           title: item.food_name,
@@ -373,7 +396,7 @@ export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptio
           food_type: item.food_type || "Generic",
           food_url: item.food_url || null,
           brand_name: item.brand_name || null,
-          image: item.food_image?.image_url || (typeof item.food_image === "string" ? item.food_image : null),
+          image: extractFoodSearchImage(item),
           type: "food",
           retriever_query: query,
         }));

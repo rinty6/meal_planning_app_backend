@@ -131,6 +131,11 @@ export const mealLogsTable = pgTable('meal_logs', {
   carbs: real('carbs'),
   fats: real('fats'),
   image: text('image'), // URL to the image
+  externalId: text('external_id'),
+  source: text('source'),
+  servingId: text('serving_id'),
+  servingDescription: text('serving_description'),
+  nutrients: jsonb('nutrients').default({}),
   
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -200,3 +205,31 @@ export const calorieGoalsTable = pgTable('calorie_goals', {
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
+
+export const mealPlanPreferencesTable = pgTable('meal_plan_preferences', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull().unique(),
+  allergens: jsonb('allergens').default([]).notNull(),
+  diets: jsonb('diets').default([]).notNull(),
+  nutrientLimits: jsonb('nutrient_limits').default({}).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  userIdIdx: uniqueIndex('meal_plan_preferences_user_id_idx').on(table.userId),
+}));
+
+export const mealPlanEventsTable = pgTable('meal_plan_events', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  clerkId: text('clerk_id'),
+  eventType: text('event_type').notNull(),
+  mealType: text('meal_type'),
+  itemId: text('item_id'),
+  itemTitle: text('item_title'),
+  source: text('source'),
+  rank: integer('rank'),
+  payload: jsonb('payload').default({}).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userCreatedAtIdx: index('meal_plan_events_user_created_at_idx').on(table.userId, table.createdAt),
+}));

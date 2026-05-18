@@ -42,7 +42,22 @@ const getActiveGoalForDate = async (userId, dateStr) => {
 
 mealRoutes.post("/add", async (req, res) => {
   try {
-    const { clerkId, date, mealType, foodName, calories, protein, carbs, fats, image } = req.body;
+    const {
+      clerkId,
+      date,
+      mealType,
+      foodName,
+      calories,
+      protein,
+      carbs,
+      fats,
+      image,
+      externalId,
+      source,
+      servingId,
+      servingDescription,
+      nutrients,
+    } = req.body;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
@@ -59,6 +74,11 @@ mealRoutes.post("/add", async (req, res) => {
       carbs: toNumber(carbs),
       fats: toNumber(fats),
       image: image || "",
+      externalId: externalId ? String(externalId) : null,
+      source: source ? String(source) : null,
+      servingId: servingId ? String(servingId) : null,
+      servingDescription: servingDescription ? String(servingDescription) : null,
+      nutrients: nutrients && typeof nutrients === "object" ? nutrients : {},
     });
 
     const goal = await getActiveGoalForDate(user.userId, dateStr);
@@ -120,6 +140,11 @@ mealRoutes.post("/add-batch", async (req, res) => {
       carbs: toNumber(item?.carbs),
       fats: toNumber(item?.fats),
       image: item?.image || "",
+      externalId: item?.externalId ? String(item.externalId) : null,
+      source: item?.source ? String(item.source) : null,
+      servingId: item?.servingId ? String(item.servingId) : null,
+      servingDescription: item?.servingDescription ? String(item.servingDescription) : null,
+      nutrients: item?.nutrients && typeof item.nutrients === "object" ? item.nutrients : {},
     }));
 
     await db.insert(mealLogsTable).values(mealRows);
@@ -234,6 +259,11 @@ mealRoutes.get("/most-consumed/:clerkId", async (req, res) => {
           count: 1,
           number_appearance: 1,
           image: meal.image || "",
+          externalId: meal.externalId || "",
+          source: meal.source || "",
+          servingId: meal.servingId || "",
+          servingDescription: meal.servingDescription || "",
+          nutrients: meal.nutrients || {},
           calories: toNumber(meal.calories),
           protein: toNumber(meal.protein),
           carbs: toNumber(meal.carbs),

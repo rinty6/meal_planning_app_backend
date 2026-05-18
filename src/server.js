@@ -11,6 +11,7 @@ import shoppingRoutes from './routes/shopping.js';
 import calorieRoutes from './routes/calorie.js';
 import recommendationRoutes from './routes/recommendation.js';
 import fatSecretRoutes from './routes/fatsecret.js';
+import mealPlanRoutes, { ensureMealPlanStorage } from './routes/mealPlan.js';
 import {
   ensureRecommendationFeedbackStorage,
   warmRecommendationRouteDependencies,
@@ -121,6 +122,7 @@ app.use('/api/shopping', shoppingRoutes);
 app.use('/api/calorie', calorieRoutes);
 app.use('/api/recommendation', recommendationRoutes);
 app.use('/api/fatsecret', fatSecretRoutes);
+app.use('/api/meal-plan', mealPlanRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/notifications', notificationRoutes);
@@ -145,6 +147,10 @@ app.use((req, res) => {
 
 void ensureRecommendationFeedbackStorage().catch((error) => {
   console.error('Recommendation feedback storage bootstrap failed:', error);
+});
+
+void ensureMealPlanStorage().catch((error) => {
+  console.error('Meal-plan storage bootstrap failed:', error);
 });
 
 void warmRecommendationRouteDependencies().catch((error) => {
