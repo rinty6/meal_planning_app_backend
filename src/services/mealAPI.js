@@ -385,21 +385,47 @@ export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptio
           params.set("food_type", input.foodType);
         }
 
-        const data = await requestFatSecret(params);
+        let data = null;
+        try {
+          data = await requestFatSecret(params);
+        } catch {
+          const fallbackParams = new URLSearchParams(params);
+          fallbackParams.set("method", "foods.search");
+          fallbackParams.delete("food_type");
+          data = await requestFatSecret(fallbackParams);
+        }
         if (!data) return [];
 
         const foods = ensureArray(data.foods_search?.results?.food || data.foods?.food);
-        const mapped = foods.map((item) => ({
-          id: String(item.food_id),
-          title: item.food_name,
-          description: item.food_description || "",
-          food_type: item.food_type || "Generic",
-          food_url: item.food_url || null,
-          brand_name: item.brand_name || null,
-          image: extractFoodSearchImage(item),
-          type: "food",
-          retriever_query: query,
-        }));
+        const mapped = foods.map((item) => {
+          const servings = ensureArray(item?.servings?.serving);
+          const serving = servings.length > 0 ? pickBestServing(servings) : {};
+          const descriptionMacros = parseDescriptionMacros(item.food_description || "");
+          const calories = Number.parseFloat(serving?.calories) || descriptionMacros.calories || 0;
+          const protein = Number.parseFloat(serving?.protein) || descriptionMacros.protein || 0;
+          const carbs = Number.parseFloat(serving?.carbohydrate) || descriptionMacros.carbs || 0;
+          const fats = Number.parseFloat(serving?.fat) || descriptionMacros.fats || 0;
+
+          return {
+            id: String(item.food_id),
+            title: item.food_name,
+            description: item.food_description || "",
+            food_type: item.food_type || "Generic",
+            food_url: item.food_url || null,
+            brand_name: item.brand_name || null,
+            image: extractFoodSearchImage(item),
+            calories,
+            protein,
+            carbs,
+            fats,
+            serving_id: serving?.serving_id || null,
+            serving_description: serving?.serving_description || null,
+            metric_serving_amount: Number.parseFloat(serving?.metric_serving_amount) || null,
+            metric_serving_unit: serving?.metric_serving_unit || null,
+            type: "food",
+            retriever_query: query,
+          };
+        });
 
         return setCached(cacheKey, mapped);
       } catch (error) {

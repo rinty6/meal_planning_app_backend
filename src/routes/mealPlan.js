@@ -591,7 +591,9 @@ const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTit
   const historyKeys = new Set(ensureArray(mostConsumedByMeal?.[candidate.mealType]).map((item) => titleKey(item.title)));
 
   let score = 100 - Math.min(45, calorieDiff * 60);
-  if (candidate.image) score += 8;
+  if (candidate.image) score += 12;
+  if (candidate.source === "fatsecret_recipe") score += 18;
+  if (normalizeKey(candidate.food_type) === "brand") score -= 22;
   if (favoriteKeys.has(key)) score += 18;
   if (historyKeys.has(key)) score += 10;
   if (eventProfile.lovedTitles.has(key)) score += 16;
@@ -603,7 +605,7 @@ const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTit
 };
 
 const fetchFoodCandidatesForQuery = async ({ query, mealType, mealTarget, rankBase }) => {
-  const hits = await searchFoodItems({ query, maxResults: 5, mealType }, 5).catch(() => []);
+  const hits = await searchFoodItems({ query, maxResults: 5, mealType, foodType: "generic" }, 5).catch(() => []);
   const uniqueHits = [];
   const seen = new Set();
   for (const hit of hits) {
@@ -667,12 +669,10 @@ const buildRecommendationsForMeal = async ({
   );
 
   const candidates = batches.flat(2);
-  const deduped = [];
-  const seen = new Set();
+  const dedupedByKey = new Map();
   for (const candidate of candidates) {
     const key = titleKey(candidate.title) || itemIdentity(candidate);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
+    if (!key) continue;
     if (!passesPreferenceFilters(candidate, preferences)) continue;
     const score = scoreCandidate({
       candidate,
@@ -681,18 +681,31 @@ const buildRecommendationsForMeal = async ({
       favoriteTitles,
       eventProfile,
     });
-    deduped.push({
+    const rankedCandidate = {
       ...candidate,
       score,
       explanation: "Recommended from FatSecret foods and recipes based on your filters and eating history.",
       behavioral_insight: "Recommended from FatSecret foods and recipes based on your filters and eating history.",
       ml_tag: "FATSECRET_V3",
       calorie_target: mealTarget,
-    });
+    };
+    const existing = dedupedByKey.get(key);
+    if (!existing || rankedCandidate.score > existing.score) {
+      dedupedByKey.set(key, rankedCandidate);
+    }
   }
 
-  return deduped
-    .sort((left, right) => right.score - left.score)
+  const deduped = Array.from(dedupedByKey.values());
+  const imageReady = deduped.filter((item) => item.image);
+  const rankedPool = imageReady.length >= 5 ? imageReady : deduped;
+
+  return rankedPool
+    .sort((left, right) => {
+      if (Boolean(left.image) !== Boolean(right.image)) {
+        return right.image ? 1 : -1;
+      }
+      return right.score - left.score;
+    })
     .slice(0, 8)
     .map((item, index) => ({ ...item, rank: index + 1 }));
 };
