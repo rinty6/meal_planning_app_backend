@@ -5,12 +5,12 @@ import { db } from "../config/db.js";
 import {
   calorieGoalsTable,
   favouritesTable,
-  mealLogsTable,
   mealPlanEventsTable,
   mealPlanPreferencesTable,
   usersTable,
 } from "../db/schema.js";
 import { getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
+import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 
 const mealPlanRoutes = express.Router();
@@ -304,55 +304,7 @@ const itemIdentity = (item) =>
 const titleKey = (value) => normalizeKey(value).replace(/[^a-z0-9]+/g, " ").trim();
 
 const getMostConsumed = async (userId, limit = 10) => {
-  const meals = await db
-    .select()
-    .from(mealLogsTable)
-    .where(eq(mealLogsTable.userId, userId))
-    .orderBy(desc(mealLogsTable.createdAt))
-    .limit(800);
-
-  const aggregates = new Map();
-  for (const meal of meals) {
-    const rawTitle = normalizeWhitespace(meal.foodName);
-    const mealType = normalizeMealType(meal.mealType);
-    if (!rawTitle || !mealType) continue;
-    const key = `${mealType}:${titleKey(rawTitle)}`;
-    const existing = aggregates.get(key);
-    if (existing) {
-      existing.count += 1;
-      if (!existing.image && meal.image) existing.image = meal.image;
-      continue;
-    }
-    aggregates.set(key, {
-      id: meal.externalId || "",
-      food_id: meal.source === "fatsecret_food" ? meal.externalId || "" : "",
-      recipe_id: meal.source === "fatsecret_recipe" ? meal.externalId || "" : "",
-      title: rawTitle,
-      food_name: rawTitle,
-      meal_type: mealType,
-      count: 1,
-      number_appearance: 1,
-      image: meal.image || "",
-      calories: toNumber(meal.calories),
-      protein: toNumber(meal.protein),
-      carbs: toNumber(meal.carbs),
-      fats: toNumber(meal.fats),
-    });
-  }
-
-  const allItems = Array.from(aggregates.values())
-    .map((item) => ({ ...item, number_appearance: item.count }))
-    .sort((left, right) => right.count - left.count);
-
-  return {
-    all: allItems.slice(0, limit),
-    byMeal: Object.fromEntries(
-      MEAL_TYPES.map((mealType) => [
-        mealType,
-        allItems.filter((item) => item.meal_type === mealType).slice(0, 5),
-      ])
-    ),
-  };
+  return getMostConsumedForUser(userId, { limit, byMealLimit: 5 });
 };
 
 const getFavoriteTitles = async (userId) => {

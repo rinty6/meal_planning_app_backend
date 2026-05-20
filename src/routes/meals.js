@@ -5,6 +5,7 @@ import { db } from "../config/db.js";
 import { mealLogsTable, usersTable, calorieGoalsTable } from "../db/schema.js";
 import { eq, and, desc, lte, gte } from "drizzle-orm";
 import { sendNotificationToUser } from "../services/notificationService.js";
+import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 
 const mealRoutes = express.Router();
 
@@ -219,8 +220,9 @@ mealRoutes.delete("/delete/:id", async (req, res) => {
   }
 });
 
-// Aggregates the user's meal history into a "most consumed" list directly from
-// Postgres. The recommendation route's `most_consumed_items` field depends on
+// Aggregates the user's full meal history into a "most consumed" list directly
+// from Postgres. This intentionally matches the SQL grouped count by food_name.
+// The recommendation route's `most_consumed_items` field depends on
 // the ML service successfully fetching history_df via DB_URL — when that fails
 // silently (env not set, transient outage), the strip on the meal planner stays
 // empty. Computing it here keeps the UI populated as long as Node can read
@@ -233,51 +235,9 @@ mealRoutes.get("/most-consumed/:clerkId", async (req, res) => {
     const user = await getUserByClerkId(clerkId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const meals = await db
-      .select()
-      .from(mealLogsTable)
-      .where(eq(mealLogsTable.userId, user.userId))
-      .orderBy(desc(mealLogsTable.createdAt))
-      .limit(800);
+    const mostConsumed = await getMostConsumedForUser(user.userId, { limit });
 
-    const aggregates = new Map();
-    for (const meal of meals) {
-      if (!["breakfast", "lunch", "dinner"].includes(meal.mealType)) continue;
-      const rawName = String(meal.foodName || "").trim();
-      if (!rawName) continue;
-      const key = rawName.toLowerCase();
-
-      const existing = aggregates.get(key);
-      if (existing) {
-        existing.count += 1;
-        if (!existing.image && meal.image) existing.image = meal.image;
-      } else {
-        aggregates.set(key, {
-          title: rawName,
-          food_name: rawName,
-          meal_type: meal.mealType,
-          count: 1,
-          number_appearance: 1,
-          image: meal.image || "",
-          externalId: meal.externalId || "",
-          source: meal.source || "",
-          servingId: meal.servingId || "",
-          servingDescription: meal.servingDescription || "",
-          nutrients: meal.nutrients || {},
-          calories: toNumber(meal.calories),
-          protein: toNumber(meal.protein),
-          carbs: toNumber(meal.carbs),
-          fats: toNumber(meal.fats),
-        });
-      }
-    }
-
-    const items = Array.from(aggregates.values())
-      .map((item) => ({ ...item, number_appearance: item.count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, limit);
-
-    res.status(200).json({ items });
+    res.status(200).json({ items: mostConsumed.all });
   } catch (error) {
     console.error("Error fetching most-consumed meals:", error);
     res.status(500).json({ error: "Failed to fetch most-consumed meals" });
