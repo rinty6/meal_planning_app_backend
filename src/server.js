@@ -16,7 +16,7 @@ import {
   ensureRecommendationFeedbackStorage,
   warmRecommendationRouteDependencies,
 } from './routes/recommendation/dataAccess.js';
-import { warmFatSecretCache } from './services/mealAPI.js';
+import { warmFatSecretCache, warmFatSecretCacheInBackground } from './services/mealAPI.js';
 import profileRoutes from './routes/profile.js';
 import deviceRoutes from './routes/devices.js';
 import notificationRoutes from './routes/notifications.js';
@@ -76,11 +76,43 @@ const shouldLogMissingRoute = (method, path) => {
   return true;
 };
 
+const isTruthyEnv = (value) => ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+const isFalseyEnv = (value) => ["0", "false", "no", "off"].includes(String(value || "").trim().toLowerCase());
+const shouldStartScheduledJobs = () => {
+  if (isTruthyEnv(process.env.NOTIFICATIONS_CRON_DISABLED) || isFalseyEnv(process.env.NOTIFICATIONS_CRON_ENABLED)) {
+    return false;
+  }
+
+  const explicitlyEnabled = isTruthyEnv(process.env.NOTIFICATIONS_CRON_ENABLED);
+  const isRailwayRuntime = Boolean(
+    process.env.RAILWAY_ENVIRONMENT ||
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.RAILWAY_SERVICE_ID
+  );
+
+  return explicitlyEnabled || ENV.NODE_ENV === "production" || isRailwayRuntime;
+};
+
 // Increased limit to 50mb to handle Base64 images
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-if (ENV.NODE_ENV === "production") {job.start();}
+if (shouldStartScheduledJobs()) {
+  job.start();
+  console.log("Notification cron jobs enabled for this backend process", {
+    nodeEnv: ENV.NODE_ENV,
+    railwayRuntime: Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID),
+    notificationsCronEnabled: process.env.NOTIFICATIONS_CRON_ENABLED || null,
+    notificationsCronDisabled: process.env.NOTIFICATIONS_CRON_DISABLED || null,
+  });
+} else {
+  console.log("Notification cron jobs not started", {
+    nodeEnv: ENV.NODE_ENV,
+    railwayRuntime: Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_SERVICE_ID),
+    notificationsCronEnabled: process.env.NOTIFICATIONS_CRON_ENABLED || null,
+    notificationsCronDisabled: process.env.NOTIFICATIONS_CRON_DISABLED || null,
+  });
+}
 
 app.use(express.json());
 
@@ -102,10 +134,12 @@ app.get(['/privacy-policy', '/privacy-policy/', '/privacy-policy.html'], (req, r
 
 // Mirror the health response on a generic path used by some hosting probes.
 app.get('/health', (req, res) => {
+  warmFatSecretCacheInBackground('health');
   res.status(200).json(buildHealthPayload());
 });
 
 app.get("/api/health", (req, res) => {
+  warmFatSecretCacheInBackground('api_health');
   res.status(200).json(buildHealthPayload());
 });
 

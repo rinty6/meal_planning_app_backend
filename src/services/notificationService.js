@@ -15,6 +15,12 @@ const sanitizePayload = (data) => {
   return data;
 };
 
+const redactPushToken = (token) => {
+  const value = String(token || "");
+  if (value.length <= 16) return value ? "[redacted]" : null;
+  return `${value.slice(0, 12)}...[redacted]...${value.slice(-6)}`;
+};
+
 export const cleanupOldNotifications = async (days = 30) => {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   await db.delete(notificationsTable).where(lte(notificationsTable.createdAt, cutoff));
@@ -67,10 +73,17 @@ const buildMessages = ({ deviceRows, title, body, data }) => {
     }));
 };
 
+const getInvalidFormatTokenCount = (deviceRows) => {
+  return deviceRows.filter((row) => !Expo.isExpoPushToken(row.pushToken)).length;
+};
+
 const removeInvalidTokens = async (tokens) => {
   const unique = [...new Set(tokens.filter(Boolean))];
   if (!unique.length) return;
   await db.delete(userDevicesTable).where(inArray(userDevicesTable.pushToken, unique));
+  console.warn("[notificationService] Removed invalid Expo push tokens", {
+    count: unique.length,
+  });
 };
 
 const sendMessagesInChunks = async (messages) => {
@@ -84,12 +97,28 @@ const sendMessagesInChunks = async (messages) => {
   const chunks = expo.chunkPushNotifications(messages);
   const ticketIdToToken = new Map();
   const ticketIds = [];
+  const invalidTokens = [];
+  const ticketErrors = [];
 
   await Promise.all(
     chunks.map(async (chunk) => {
       const tickets = await expo.sendPushNotificationsAsync(chunk);
       tickets.forEach((ticket, idx) => {
         const token = chunk[idx]?.to;
+        if (ticket?.status === "error") {
+          const errorCode = ticket?.details?.error || "UnknownExpoTicketError";
+          if (errorCode === "DeviceNotRegistered" && token) {
+            invalidTokens.push(token);
+          } else {
+            ticketErrors.push({
+              token: redactPushToken(token),
+              errorCode,
+              message: ticket?.message || null,
+            });
+          }
+          return;
+        }
+
         if (ticket?.id && token) {
           ticketIds.push(ticket.id);
           ticketIdToToken.set(ticket.id, token);
@@ -98,10 +127,18 @@ const sendMessagesInChunks = async (messages) => {
     })
   );
 
+  if (ticketErrors.length) {
+    console.warn("[notificationService] Expo push ticket errors", {
+      count: ticketErrors.length,
+      errors: ticketErrors,
+    });
+  }
+
   if (!ticketIds.length) {
+    await removeInvalidTokens(invalidTokens);
     return {
-      sent: messages.length,
-      invalidTokensRemoved: 0,
+      sent: Math.max(0, messages.length - invalidTokens.length),
+      invalidTokensRemoved: [...new Set(invalidTokens)].length,
     };
   }
 
@@ -109,26 +146,55 @@ const sendMessagesInChunks = async (messages) => {
   await sleep(1200);
 
   const receiptChunks = expo.chunkPushNotificationReceiptIds(ticketIds);
-  const invalidTokens = [];
+  const receiptErrors = [];
 
   await Promise.all(
     receiptChunks.map(async (chunk) => {
       const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
       Object.entries(receipts).forEach(([ticketId, receipt]) => {
-        if (receipt?.status === "error" && receipt?.details?.error === "DeviceNotRegistered") {
+        if (receipt?.status === "error") {
           const token = ticketIdToToken.get(ticketId);
-          if (token) invalidTokens.push(token);
+          const errorCode = receipt?.details?.error || "UnknownExpoReceiptError";
+          if (errorCode === "DeviceNotRegistered") {
+            if (token) invalidTokens.push(token);
+          } else {
+            receiptErrors.push({
+              token: redactPushToken(token),
+              errorCode,
+              message: receipt?.message || null,
+            });
+          }
         }
       });
     })
   );
 
+  if (receiptErrors.length) {
+    console.warn("[notificationService] Expo push receipt errors", {
+      count: receiptErrors.length,
+      errors: receiptErrors,
+    });
+  }
+
   await removeInvalidTokens(invalidTokens);
 
   return {
-    sent: messages.length,
+    sent: Math.max(0, messages.length - invalidTokens.length),
     invalidTokensRemoved: [...new Set(invalidTokens)].length,
   };
+};
+
+const logDeviceCoverage = ({ scope, userIds, deviceRows, messages }) => {
+  const invalidFormatCount = getInvalidFormatTokenCount(deviceRows);
+  if (!deviceRows.length || !messages.length || invalidFormatCount > 0) {
+    console.warn("[notificationService] Push device coverage", {
+      scope,
+      userCount: userIds.length,
+      deviceCount: deviceRows.length,
+      validExpoTokenCount: messages.length,
+      invalidFormatCount,
+    });
+  }
 };
 
 export const sendNotificationToUser = async ({
@@ -140,6 +206,7 @@ export const sendNotificationToUser = async ({
   await saveNotification({ userId, title, body, data });
   const deviceRows = await fetchDeviceRows([userId]);
   const messages = buildMessages({ deviceRows, title, body, data });
+  logDeviceCoverage({ scope: "single_user", userIds: [userId], deviceRows, messages });
   return sendMessagesInChunks(messages);
 };
 
@@ -156,6 +223,7 @@ export const sendNotificationToUsers = async ({
   await saveNotificationsForUsers({ userIds: uniqueUserIds, title, body, data });
   const deviceRows = await fetchDeviceRows(uniqueUserIds);
   const messages = buildMessages({ deviceRows, title, body, data });
+  logDeviceCoverage({ scope: "bulk_users", userIds: uniqueUserIds, deviceRows, messages });
   return sendMessagesInChunks(messages);
 };
 

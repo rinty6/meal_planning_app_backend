@@ -40,8 +40,13 @@ const servingRichnessFields = [
 
 let accessToken = null;
 let tokenExpiresAt = 0;
+let accessTokenPromise = null;
 
 const apiCache = new Map();
+const apiInFlight = new Map();
+let warmFatSecretCachePromise = null;
+let fatSecretCacheWarmedAt = 0;
+const FATSECRET_WARMUP_MIN_INTERVAL_MS = 25 * 60 * 1000;
 
 const makeCacheKey = (prefix, values) => {
   const normalized = values.map((value) => String(value ?? "").trim().toLowerCase()).join("|");
@@ -66,6 +71,24 @@ const setCached = (key, value) => {
     expiresAt: Date.now() + CACHE_TTL_MS,
   });
   return value;
+};
+
+const getCachedOrFetch = async (key, fetcher) => {
+  const cached = getCached(key);
+  if (cached) return cached;
+
+  const inFlight = apiInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    const value = await fetcher();
+    return setCached(key, value);
+  })().finally(() => {
+    apiInFlight.delete(key);
+  });
+
+  apiInFlight.set(key, promise);
+  return promise;
 };
 
 const ensureArray = (value) => {
@@ -155,7 +178,11 @@ const getAccessToken = async (forceRefresh = false) => {
     return accessToken;
   }
 
-  try {
+  if (!forceRefresh && accessTokenPromise) {
+    return accessTokenPromise;
+  }
+
+  accessTokenPromise = (async () => {
     const credentials = encode(`${CLIENT_ID}:${CLIENT_SECRET}`);
     const response = await fetch(OAUTH_URL, {
       method: "POST",
@@ -176,11 +203,17 @@ const getAccessToken = async (forceRefresh = false) => {
     accessToken = data.access_token;
     tokenExpiresAt = Date.now() + ((Number(data.expires_in) || 3600) * 1000);
     return accessToken;
+  })();
+
+  try {
+    return await accessTokenPromise;
   } catch (error) {
     console.error("Auth Error:", error);
     accessToken = null;
     tokenExpiresAt = 0;
     return null;
+  } finally {
+    accessTokenPromise = null;
   }
 };
 
@@ -300,49 +333,46 @@ export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions
   const mappedResults = await Promise.all(
     queries.map(async (query) => {
       const cacheKey = makeCacheKey("recipes.search", [query, input.maxResults]);
-      const cached = getCached(cacheKey);
-      if (cached) return cached;
-
-      try {
-        const params = new URLSearchParams({
-          method: "recipes.search",
-          search_expression: query,
-          format: "json",
-          max_results: String(input.maxResults),
-          include_food_images: "true",
-        });
-
-        let data = null;
+      return getCachedOrFetch(cacheKey, async () => {
         try {
-          data = await requestFatSecret(params);
-        } catch {
-          const fallbackParams = new URLSearchParams(params);
-          fallbackParams.set("method", "foods.search");
-          fallbackParams.delete("food_type");
-          data = await requestFatSecret(fallbackParams);
+          const params = new URLSearchParams({
+            method: "recipes.search",
+            search_expression: query,
+            format: "json",
+            max_results: String(input.maxResults),
+            include_food_images: "true",
+          });
+
+          let data = null;
+          try {
+            data = await requestFatSecret(params);
+          } catch {
+            const fallbackParams = new URLSearchParams(params);
+            fallbackParams.set("method", "foods.search");
+            fallbackParams.delete("food_type");
+            data = await requestFatSecret(fallbackParams);
+          }
+          if (!data) return [];
+
+          const recipes = ensureArray(data.recipes?.recipe);
+          return recipes.map((item) => ({
+            id: String(item.recipe_id),
+            title: item.recipe_name,
+            calories: Number.parseInt(item.recipe_nutrition?.calories, 10) || 0,
+            protein: Number.parseFloat(item.recipe_nutrition?.protein) || 0,
+            carbs: Number.parseFloat(item.recipe_nutrition?.carbohydrate) || 0,
+            fats: Number.parseFloat(item.recipe_nutrition?.fat) || 0,
+            image: item.recipe_image,
+            time: item.preparation_time_min ? `${item.preparation_time_min} min` : "15 min",
+            type: "recipe",
+            retriever_query: query,
+          }));
+        } catch (error) {
+          console.error("Backend Search Recipe Error:", error);
+          if (throwOnError) throw coerceFatSecretError(error, "Recipe search failed.");
+          return [];
         }
-        if (!data) return [];
-
-        const recipes = ensureArray(data.recipes?.recipe);
-        const mapped = recipes.map((item) => ({
-          id: String(item.recipe_id),
-          title: item.recipe_name,
-          calories: Number.parseInt(item.recipe_nutrition?.calories, 10) || 0,
-          protein: Number.parseFloat(item.recipe_nutrition?.protein) || 0,
-          carbs: Number.parseFloat(item.recipe_nutrition?.carbohydrate) || 0,
-          fats: Number.parseFloat(item.recipe_nutrition?.fat) || 0,
-          image: item.recipe_image,
-          time: item.preparation_time_min ? `${item.preparation_time_min} min` : "15 min",
-          type: "recipe",
-          retriever_query: query,
-        }));
-
-        return setCached(cacheKey, mapped);
-      } catch (error) {
-        console.error("Backend Search Recipe Error:", error);
-        if (throwOnError) throw coerceFatSecretError(error, "Recipe search failed.");
-        return [];
-      }
+      });
     })
   );
 
@@ -370,69 +400,66 @@ export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptio
   const mappedResults = await Promise.all(
     queries.map(async (query) => {
       const cacheKey = makeCacheKey("foods.search.v5", [query, input.maxResults, input.foodType]);
-      const cached = getCached(cacheKey);
-      if (cached) return cached;
-
-      try {
-        const params = new URLSearchParams({
-          method: "foods.search.v5",
-          search_expression: query,
-          format: "json",
-          max_results: String(input.maxResults),
-          include_food_images: "true",
-        });
-        if (input.foodType === "brand" || input.foodType === "generic") {
-          params.set("food_type", input.foodType);
-        }
-
-        let data = null;
+      return getCachedOrFetch(cacheKey, async () => {
         try {
-          data = await requestFatSecret(params);
-        } catch {
-          const fallbackParams = new URLSearchParams(params);
-          fallbackParams.set("method", "foods.search");
-          fallbackParams.delete("food_type");
-          data = await requestFatSecret(fallbackParams);
+          const params = new URLSearchParams({
+            method: "foods.search.v5",
+            search_expression: query,
+            format: "json",
+            max_results: String(input.maxResults),
+            include_food_images: "true",
+          });
+          if (input.foodType === "brand" || input.foodType === "generic") {
+            params.set("food_type", input.foodType);
+          }
+
+          let data = null;
+          try {
+            data = await requestFatSecret(params);
+          } catch {
+            const fallbackParams = new URLSearchParams(params);
+            fallbackParams.set("method", "foods.search");
+            fallbackParams.delete("food_type");
+            data = await requestFatSecret(fallbackParams);
+          }
+          if (!data) return [];
+
+          const foods = ensureArray(data.foods_search?.results?.food || data.foods?.food);
+          return foods.map((item) => {
+            const servings = ensureArray(item?.servings?.serving);
+            const serving = servings.length > 0 ? pickBestServing(servings) : {};
+            const descriptionMacros = parseDescriptionMacros(item.food_description || "");
+            const calories = Number.parseFloat(serving?.calories) || descriptionMacros.calories || 0;
+            const protein = Number.parseFloat(serving?.protein) || descriptionMacros.protein || 0;
+            const carbs = Number.parseFloat(serving?.carbohydrate) || descriptionMacros.carbs || 0;
+            const fats = Number.parseFloat(serving?.fat) || descriptionMacros.fats || 0;
+
+            return {
+              id: String(item.food_id),
+              title: item.food_name,
+              description: item.food_description || "",
+              food_type: item.food_type || "Generic",
+              food_url: item.food_url || null,
+              brand_name: item.brand_name || null,
+              image: extractFoodSearchImage(item),
+              calories,
+              protein,
+              carbs,
+              fats,
+              serving_id: serving?.serving_id || null,
+              serving_description: serving?.serving_description || null,
+              metric_serving_amount: Number.parseFloat(serving?.metric_serving_amount) || null,
+              metric_serving_unit: serving?.metric_serving_unit || null,
+              type: "food",
+              retriever_query: query,
+            };
+          });
+        } catch (error) {
+          console.error("searchFoodItems Error:", error);
+          if (throwOnError) throw coerceFatSecretError(error, "Food search failed.");
+          return [];
         }
-        if (!data) return [];
-
-        const foods = ensureArray(data.foods_search?.results?.food || data.foods?.food);
-        const mapped = foods.map((item) => {
-          const servings = ensureArray(item?.servings?.serving);
-          const serving = servings.length > 0 ? pickBestServing(servings) : {};
-          const descriptionMacros = parseDescriptionMacros(item.food_description || "");
-          const calories = Number.parseFloat(serving?.calories) || descriptionMacros.calories || 0;
-          const protein = Number.parseFloat(serving?.protein) || descriptionMacros.protein || 0;
-          const carbs = Number.parseFloat(serving?.carbohydrate) || descriptionMacros.carbs || 0;
-          const fats = Number.parseFloat(serving?.fat) || descriptionMacros.fats || 0;
-
-          return {
-            id: String(item.food_id),
-            title: item.food_name,
-            description: item.food_description || "",
-            food_type: item.food_type || "Generic",
-            food_url: item.food_url || null,
-            brand_name: item.brand_name || null,
-            image: extractFoodSearchImage(item),
-            calories,
-            protein,
-            carbs,
-            fats,
-            serving_id: serving?.serving_id || null,
-            serving_description: serving?.serving_description || null,
-            metric_serving_amount: Number.parseFloat(serving?.metric_serving_amount) || null,
-            metric_serving_unit: serving?.metric_serving_unit || null,
-            type: "food",
-            retriever_query: query,
-          };
-        });
-
-        return setCached(cacheKey, mapped);
-      } catch (error) {
-        console.error("searchFoodItems Error:", error);
-        if (throwOnError) throw coerceFatSecretError(error, "Food search failed.");
-        return [];
-      }
+      });
     })
   );
 
@@ -713,24 +740,42 @@ export const getDetailedMacros = async (foodIds = []) => {
 //
 // All tasks are best-effort and run in parallel; a failure in any one task is
 // logged but never blocks server startup.
-export const warmFatSecretCache = async () => {
-  const startedAt = Date.now();
-  const warmupTasks = [
-    // Pre-fetch the OAuth token so it is cached for the first user request.
-    getAccessToken().catch((error) => {
-      console.warn("[mealAPI] FatSecret warmup: token fetch failed (non-fatal):", error?.message || error);
-    }),
-    // Prime the recipes.search cache for the default "healthy" query used by
-    // the Recipe tab on its initial load.
-    searchRecipes("healthy", 15).catch((error) => {
-      console.warn("[mealAPI] FatSecret warmup: recipes.search failed (non-fatal):", error?.message || error);
-    }),
-    // Prime the foods.search cache for the same default query.
-    searchFoodItems("healthy", 10).catch((error) => {
-      console.warn("[mealAPI] FatSecret warmup: foods.search failed (non-fatal):", error?.message || error);
-    }),
-  ];
+export const warmFatSecretCache = async ({ force = false, reason = "startup" } = {}) => {
+  const warmedRecently = fatSecretCacheWarmedAt > 0 && Date.now() - fatSecretCacheWarmedAt < FATSECRET_WARMUP_MIN_INTERVAL_MS;
+  if (!force && warmedRecently) return { skipped: true, reason: "recently_warmed" };
+  if (warmFatSecretCachePromise) return warmFatSecretCachePromise;
 
-  await Promise.allSettled(warmupTasks);
-  console.log(`[mealAPI] FatSecret cache warmed in ${Date.now() - startedAt} ms`);
+  warmFatSecretCachePromise = (async () => {
+    const startedAt = Date.now();
+    const warmupTasks = [
+      // Pre-fetch the OAuth token so it is cached for the first user request.
+      getAccessToken().catch((error) => {
+        console.warn("[mealAPI] FatSecret warmup: token fetch failed (non-fatal):", error?.message || error);
+      }),
+      // Prime the recipes.search cache for the default "healthy" query used by
+      // the Recipe tab on its initial load.
+      searchRecipes("healthy", 15).catch((error) => {
+        console.warn("[mealAPI] FatSecret warmup: recipes.search failed (non-fatal):", error?.message || error);
+      }),
+      // Prime the foods.search cache for the same default query.
+      searchFoodItems("healthy", 10).catch((error) => {
+        console.warn("[mealAPI] FatSecret warmup: foods.search failed (non-fatal):", error?.message || error);
+      }),
+    ];
+
+    await Promise.allSettled(warmupTasks);
+    fatSecretCacheWarmedAt = Date.now();
+    console.log(`[mealAPI] FatSecret cache warmed in ${fatSecretCacheWarmedAt - startedAt} ms (${reason})`);
+    return { skipped: false, reason, durationMs: fatSecretCacheWarmedAt - startedAt };
+  })().finally(() => {
+    warmFatSecretCachePromise = null;
+  });
+
+  return warmFatSecretCachePromise;
+};
+
+export const warmFatSecretCacheInBackground = (reason = "background") => {
+  void warmFatSecretCache({ reason }).catch((error) => {
+    console.warn("[mealAPI] FatSecret background warmup failed (non-fatal):", error?.message || error);
+  });
 };

@@ -42,10 +42,19 @@ const ALLOWED_EVENT_TYPES = new Set([
 ]);
 const NUTRIENT_KEYS = ["calories", "protein", "carbs", "fat", "fiber", "sugar", "sodium", "cholesterol"];
 const DEFAULT_DAILY_CALORIES = 2000;
-const RECOMMENDATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const RECOMMENDATION_CACHE_TTL_MS = 30 * 60 * 1000;
 const recommendationCache = createTtlCache({
   ttlMs: RECOMMENDATION_CACHE_TTL_MS,
   maxEntries: 1000,
+});
+
+mealPlanRoutes.use((req, res, next) => {
+  delete req.headers["if-none-match"];
+  delete req.headers["if-modified-since"];
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  next();
 });
 
 let mealPlanStorageReadyPromise = null;
@@ -403,7 +412,28 @@ const uniqueStrings = (values, limit = 8) => {
   return output;
 };
 
-const buildSearchQueries = ({ mealType, preferences, mostConsumedByMeal, favoriteTitles, forceExploration }) => {
+const hashString = (value) => {
+  let hash = 0;
+  const text = String(value ?? "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+};
+
+const rotateBySeed = (values, seed) => {
+  const list = ensureArray(values);
+  if (list.length <= 1 || seed === undefined || seed === null || seed === "") return list;
+  const offset = hashString(seed) % list.length;
+  return [...list.slice(offset), ...list.slice(0, offset)];
+};
+
+const seededScoreJitter = (seed, identity) => {
+  if (seed === undefined || seed === null || seed === "") return 0;
+  return (hashString(`${seed}:${identity}`) % 1200) / 100;
+};
+
+const buildSearchQueries = ({ mealType, preferences, mostConsumedByMeal, favoriteTitles, forceExploration, explorationSeed }) => {
   const dietPrefix = preferences.diets[0] ? `${preferences.diets[0]} ` : "";
   const historyQueries = ensureArray(mostConsumedByMeal?.[mealType])
     .map((item) => item.title)
@@ -411,14 +441,16 @@ const buildSearchQueries = ({ mealType, preferences, mostConsumedByMeal, favorit
   const favoriteQueries = ensureArray(favoriteTitles).slice(0, 2);
   const defaultQueries = DEFAULT_QUERIES_BY_MEAL[mealType] || [];
   const rotatedDefaults = forceExploration
-    ? [...defaultQueries.slice(2), ...defaultQueries.slice(0, 2)]
+    ? rotateBySeed(defaultQueries, explorationSeed || Date.now())
     : defaultQueries;
+  const rotatedHistoryQueries = forceExploration ? rotateBySeed(historyQueries, explorationSeed) : historyQueries;
+  const rotatedFavoriteQueries = forceExploration ? rotateBySeed(favoriteQueries, explorationSeed) : favoriteQueries;
 
   return uniqueStrings(
     [
       `${dietPrefix}${mealType}`,
-      ...historyQueries.map((title) => `${dietPrefix}${title}`),
-      ...favoriteQueries.map((title) => `${dietPrefix}${title}`),
+      ...rotatedHistoryQueries.map((title) => `${dietPrefix}${title}`),
+      ...rotatedFavoriteQueries.map((title) => `${dietPrefix}${title}`),
       ...rotatedDefaults.map((query) => `${dietPrefix}${query}`),
     ],
     5
@@ -582,7 +614,7 @@ const passesPreferenceFilters = (candidate, preferences) =>
   passesDietFilters(candidate, preferences.diets) &&
   passesNutrientFilters(candidate, preferences.nutrientLimits);
 
-const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTitles, eventProfile }) => {
+const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTitles, eventProfile, forceExploration, explorationSeed }) => {
   const calories = toNumber(candidate.calories, 0);
   const calorieDiff = mealTarget > 0 && calories > 0 ? Math.abs(calories - mealTarget) / mealTarget : 0.35;
   const key = titleKey(candidate.title);
@@ -601,6 +633,7 @@ const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTit
   if (eventProfile.selectedTitles.has(key)) score += 6;
   if (eventProfile.skippedTitles.has(key) || eventProfile.skippedIds.has(id)) score -= 80;
   score -= toNumber(candidate.rank_base, 0) * 0.4;
+  if (forceExploration) score += seededScoreJitter(explorationSeed, `${id}:${key}`);
   return Math.round(score * 100) / 100;
 };
 
@@ -641,6 +674,7 @@ const buildRecommendationsForMeal = async ({
   favoriteTitles,
   eventProfile,
   forceExploration,
+  explorationSeed,
 }) => {
   const queries = buildSearchQueries({
     mealType,
@@ -648,6 +682,7 @@ const buildRecommendationsForMeal = async ({
     mostConsumedByMeal,
     favoriteTitles,
     forceExploration,
+    explorationSeed,
   });
 
   const batches = await Promise.all(
@@ -680,6 +715,8 @@ const buildRecommendationsForMeal = async ({
       mostConsumedByMeal,
       favoriteTitles,
       eventProfile,
+      forceExploration,
+      explorationSeed,
     });
     const rankedCandidate = {
       ...candidate,
@@ -820,7 +857,6 @@ mealPlanRoutes.put("/preferences/:clerkId", async (req, res) => {
         },
       });
 
-    recommendationCache.clear();
     return res.status(200).json(serializePreferencesResponse(preferences));
   } catch (error) {
     console.error("Meal plan preferences save error:", error);
@@ -837,6 +873,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
 
     const selectedMealType = normalizeMealType(req.query.mealType);
     const forceExploration = parseBool(req.query.force_exploration) || parseBool(req.query.forceExploration);
+    const explorationSeed = normalizeWhitespace(req.query.exploration_seed || req.query.explorationSeed);
     const dateStr = normalizeDateString(req.query.date);
     const preferences = normalizePreferences(req.query.preferences ? JSON.parse(String(req.query.preferences)) : await getSavedPreferences(user.userId));
     const cacheKey = JSON.stringify({
@@ -872,6 +909,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
           favoriteTitles,
           eventProfile,
           forceExploration,
+          explorationSeed,
         });
       })
     );
@@ -893,6 +931,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
       allowed_nutrients: NUTRIENT_KEYS,
       used_safety_fallback: false,
       force_exploration_used: forceExploration,
+      exploration_seed: explorationSeed || null,
     };
 
     if (!forceExploration) {

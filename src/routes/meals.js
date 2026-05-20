@@ -98,7 +98,7 @@ mealRoutes.post("/add", async (req, res) => {
     if (goal.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
-        title: "Daily Goal Achieved! 🎉",
+        title: "Daily Goal Achieved!",
         body: `Congratulations! You've met your calorie target of ${target} kcal today.`,
         data: { screen: "/(tabs)/profile/notifications", type: "goal_achieved" },
       });
