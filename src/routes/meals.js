@@ -20,6 +20,13 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const parsePositiveIntegerId = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 const getUserByClerkId = async (clerkId) => {
   const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
   return user.length > 0 ? user[0] : null;
@@ -65,7 +72,7 @@ mealRoutes.post("/add", async (req, res) => {
     const user = await getUserByClerkId(clerkId);
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    await db.insert(mealLogsTable).values({
+    const insertedMeals = await db.insert(mealLogsTable).values({
       userId: user.userId,
       date: dateStr,
       mealType,
@@ -80,7 +87,8 @@ mealRoutes.post("/add", async (req, res) => {
       servingId: servingId ? String(servingId) : null,
       servingDescription: servingDescription ? String(servingDescription) : null,
       nutrients: nutrients && typeof nutrients === "object" ? nutrients : {},
-    });
+    }).returning();
+    const meal = insertedMeals[0] || null;
 
     const goal = await getActiveGoalForDate(user.userId, dateStr);
     const target = toNumber(goal.dailyCalories) || 2000;
@@ -112,6 +120,7 @@ mealRoutes.post("/add", async (req, res) => {
       exceededLimit,
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
+      meal,
     });
   } catch (error) {
     console.error("Error adding meal:", error);
@@ -211,7 +220,10 @@ mealRoutes.get("/summary/:clerkId/:date", async (req, res) => {
 
 mealRoutes.delete("/delete/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parsePositiveIntegerId(req.params.id);
+    if (!id) {
+      return res.status(400).json({ error: "Invalid meal log id" });
+    }
     await db.delete(mealLogsTable).where(eq(mealLogsTable.id, id));
     res.status(200).json({ success: true, message: "Item deleted" });
   } catch (error) {
