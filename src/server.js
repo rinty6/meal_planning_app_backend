@@ -192,8 +192,8 @@ void warmRecommendationRouteDependencies().catch((error) => {
 });
 
 // Eagerly fetch the FatSecret OAuth token and prime the in-process apiCache for
-// the "healthy" default search so the first real Recipe/Meal-Planning visit
-// after a deploy does not pay the cold-start latency captured in the logs.
+// the default Recipe and Meal-Planning searches so the first real visit after a
+// deploy does not pay the cold-start latency captured in the logs.
 void warmFatSecretCache().catch((error) => {
   console.error('FatSecret cache warmup failed:', error);
 });

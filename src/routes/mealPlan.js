@@ -47,6 +47,12 @@ const recommendationCache = createTtlCache({
   ttlMs: RECOMMENDATION_CACHE_TTL_MS,
   maxEntries: 1000,
 });
+const recommendationInFlight = new Map();
+const MEAL_PLAN_QUERY_LIMIT = 3;
+const MEAL_PLAN_FOOD_SEARCH_LIMIT = 4;
+const MEAL_PLAN_RECIPE_SEARCH_LIMIT = 3;
+const MEAL_PLAN_FOOD_DETAIL_HYDRATION_LIMIT = 1;
+const MEAL_PLAN_SLOW_LOG_MS = 1500;
 
 mealPlanRoutes.use((req, res, next) => {
   delete req.headers["if-none-match"];
@@ -405,7 +411,7 @@ const buildSearchQueries = ({ mealType, preferences, mostConsumedByMeal, favorit
       ...rotatedFavoriteQueries.map((title) => `${dietPrefix}${title}`),
       ...rotatedDefaults.map((query) => `${dietPrefix}${query}`),
     ],
-    5
+    MEAL_PLAN_QUERY_LIMIT
   );
 };
 
@@ -590,7 +596,10 @@ const scoreCandidate = ({ candidate, mealTarget, mostConsumedByMeal, favoriteTit
 };
 
 const fetchFoodCandidatesForQuery = async ({ query, mealType, mealTarget, rankBase }) => {
-  const hits = await searchFoodItems({ query, maxResults: 5, mealType, foodType: "generic" }, 5).catch(() => []);
+  const hits = await searchFoodItems(
+    { query, maxResults: MEAL_PLAN_FOOD_SEARCH_LIMIT, mealType, foodType: "generic" },
+    MEAL_PLAN_FOOD_SEARCH_LIMIT
+  ).catch(() => []);
   const uniqueHits = [];
   const seen = new Set();
   for (const hit of hits) {
@@ -598,21 +607,31 @@ const fetchFoodCandidatesForQuery = async ({ query, mealType, mealTarget, rankBa
     if (!id || seen.has(id)) continue;
     seen.add(id);
     uniqueHits.push(hit);
+    if (uniqueHits.length >= MEAL_PLAN_FOOD_SEARCH_LIMIT) break;
   }
 
-  const hydrated = await Promise.all(
-    uniqueHits.slice(0, 5).map(async (hit, index) => {
+  const hydratedEntries = await Promise.all(
+    uniqueHits.slice(0, MEAL_PLAN_FOOD_DETAIL_HYDRATION_LIMIT).map(async (hit) => {
       const id = normalizeWhitespace(hit?.id || hit?.food_id);
       const detail = await getFoodItemById(id, { expectedCalories: mealTarget }).catch(() => null);
-      return normalizeFoodCandidate(detail || hit, mealType, query, rankBase + index);
+      return [id, detail];
     })
   );
+  const hydratedById = new Map(hydratedEntries.filter(([, detail]) => detail));
 
-  return hydrated.filter(Boolean);
+  return uniqueHits
+    .map((hit, index) => {
+      const id = normalizeWhitespace(hit?.id || hit?.food_id);
+      return normalizeFoodCandidate(hydratedById.get(id) || hit, mealType, query, rankBase + index);
+    })
+    .filter(Boolean);
 };
 
 const fetchRecipeCandidatesForQuery = async ({ query, mealType, rankBase }) => {
-  const recipes = await searchRecipes({ query, maxResults: 3, mealType }, 3).catch(() => []);
+  const recipes = await searchRecipes(
+    { query, maxResults: MEAL_PLAN_RECIPE_SEARCH_LIMIT, mealType },
+    MEAL_PLAN_RECIPE_SEARCH_LIMIT
+  ).catch(() => []);
   return recipes
     .map((recipe, index) => normalizeRecipeCandidate(recipe, mealType, query, rankBase + index))
     .filter(Boolean);
@@ -818,6 +837,7 @@ mealPlanRoutes.put("/preferences/:clerkId", async (req, res) => {
 
 mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
   try {
+    const requestStartedAt = Date.now();
     await ensureMealPlanStorage();
     const { clerkId } = req.params;
     const user = await getUserByClerkId(clerkId);
@@ -838,58 +858,95 @@ mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
     if (!forceExploration) {
       const cached = recommendationCache.get(cacheKey);
       if (cached) return res.status(200).json(cached);
+
+      const inFlight = recommendationInFlight.get(cacheKey);
+      if (inFlight) {
+        const payload = await inFlight;
+        return res.status(200).json(payload);
+      }
     }
 
-    const [dailyTarget, mostConsumed, favoriteTitles, eventProfile] = await Promise.all([
-      getActiveGoalForDate(user.userId, dateStr),
-      getMostConsumed(user.userId, 10),
-      getFavoriteTitles(user.userId),
-      getEventProfile(user.userId),
-    ]);
+    const buildPromise = (async () => {
+      const [dailyTarget, mostConsumed, favoriteTitles, eventProfile] = await Promise.all([
+        getActiveGoalForDate(user.userId, dateStr),
+        getMostConsumed(user.userId, 10),
+        getFavoriteTitles(user.userId),
+        getEventProfile(user.userId),
+      ]);
 
-    const mealTargets = buildMealTargets(dailyTarget);
-    const mealTypesToBuild = selectedMealType ? [selectedMealType] : MEAL_TYPES;
-    const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [] };
+      const mealTargets = buildMealTargets(dailyTarget);
+      const mealTypesToBuild = selectedMealType ? [selectedMealType] : MEAL_TYPES;
+      const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [] };
 
-    await Promise.all(
-      mealTypesToBuild.map(async (mealType) => {
-        recommendationsByMeal[mealType] = await buildRecommendationsForMeal({
-          mealType,
-          preferences,
-          mealTarget: mealTargets[mealType],
-          mostConsumedByMeal: mostConsumed.byMeal,
-          favoriteTitles,
-          eventProfile,
-          forceExploration,
-          explorationSeed,
+      await Promise.all(
+        mealTypesToBuild.map(async (mealType) => {
+          recommendationsByMeal[mealType] = await buildRecommendationsForMeal({
+            mealType,
+            preferences,
+            mealTarget: mealTargets[mealType],
+            mostConsumedByMeal: mostConsumed.byMeal,
+            favoriteTitles,
+            eventProfile,
+            forceExploration,
+            explorationSeed,
+          });
+        })
+      );
+
+      const payload = {
+        source: "fatsecret_v3",
+        recommendationsByMeal,
+        recommendedByMeal: recommendationsByMeal,
+        recommended: selectedMealType ? recommendationsByMeal[selectedMealType] : undefined,
+        meal_calorie_targets: mealTargets,
+        meal_calorie_target: selectedMealType ? mealTargets[selectedMealType] : undefined,
+        daily_calorie_target: dailyTarget,
+        most_consumed_items: mostConsumed.all,
+        most_consumed_by_meal: mostConsumed.byMeal,
+        preferences,
+        active_filter_count: countActiveFilters(preferences),
+        allowed_allergens: ALLOWED_MEAL_PLAN_ALLERGENS,
+        allowed_diets: ALLOWED_MEAL_PLAN_DIETS,
+        allowed_nutrients: NUTRIENT_KEYS,
+        used_safety_fallback: false,
+        force_exploration_used: forceExploration,
+        exploration_seed: explorationSeed || null,
+      };
+
+      if (!forceExploration) {
+        recommendationCache.set(cacheKey, payload);
+      }
+
+      const durationMs = Date.now() - requestStartedAt;
+      if (durationMs > MEAL_PLAN_SLOW_LOG_MS) {
+        const totalRecommendations = Object.values(recommendationsByMeal)
+          .reduce((sum, items) => sum + ensureArray(items).length, 0);
+        console.warn("[mealPlan.js] slow recommendation build", {
+          durationMs,
+          clerkId,
+          mealTypesBuilt: mealTypesToBuild,
+          queryLimit: MEAL_PLAN_QUERY_LIMIT,
+          foodSearchLimit: MEAL_PLAN_FOOD_SEARCH_LIMIT,
+          foodDetailHydrationLimit: MEAL_PLAN_FOOD_DETAIL_HYDRATION_LIMIT,
+          recipeSearchLimit: MEAL_PLAN_RECIPE_SEARCH_LIMIT,
+          totalRecommendations,
         });
-      })
-    );
+      }
 
-    const payload = {
-      source: "fatsecret_v3",
-      recommendationsByMeal,
-      recommendedByMeal: recommendationsByMeal,
-      recommended: selectedMealType ? recommendationsByMeal[selectedMealType] : undefined,
-      meal_calorie_targets: mealTargets,
-      meal_calorie_target: selectedMealType ? mealTargets[selectedMealType] : undefined,
-      daily_calorie_target: dailyTarget,
-      most_consumed_items: mostConsumed.all,
-      most_consumed_by_meal: mostConsumed.byMeal,
-      preferences,
-      active_filter_count: countActiveFilters(preferences),
-      allowed_allergens: ALLOWED_MEAL_PLAN_ALLERGENS,
-      allowed_diets: ALLOWED_MEAL_PLAN_DIETS,
-      allowed_nutrients: NUTRIENT_KEYS,
-      used_safety_fallback: false,
-      force_exploration_used: forceExploration,
-      exploration_seed: explorationSeed || null,
-    };
+      return payload;
+    })();
 
     if (!forceExploration) {
-      recommendationCache.set(cacheKey, payload);
+      recommendationInFlight.set(cacheKey, buildPromise);
     }
-    recordShownEvents({ user, clerkId, recommendationsByMeal, preferences });
+
+    const payload = await buildPromise.finally(() => {
+      if (!forceExploration) {
+        recommendationInFlight.delete(cacheKey);
+      }
+    });
+
+    recordShownEvents({ user, clerkId, recommendationsByMeal: payload.recommendationsByMeal, preferences });
 
     return res.status(200).json(payload);
   } catch (error) {

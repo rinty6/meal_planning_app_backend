@@ -47,6 +47,7 @@ const apiInFlight = new Map();
 let warmFatSecretCachePromise = null;
 let fatSecretCacheWarmedAt = 0;
 const FATSECRET_WARMUP_MIN_INTERVAL_MS = 25 * 60 * 1000;
+const MEAL_PLAN_WARMUP_QUERIES = ["breakfast", "lunch", "dinner"];
 
 const makeCacheKey = (prefix, values) => {
   const normalized = values.map((value) => String(value ?? "").trim().toLowerCase()).join("|");
@@ -735,8 +736,8 @@ export const getDetailedMacros = async (foodIds = []) => {
 // UptimeRobot pings /api/health to keep the Node process alive, but /api/health
 // never exercises FatSecret, so the token and response caches stay cold until
 // a real user shows up. This warmup pre-fills both as soon as the server is
-// listening, so the first real Recipe-page visit hits a warm in-process cache
-// (~1 ms) instead of paying the cold path.
+// listening, so the first real Recipe-page or Meal-Planning visit can reuse a
+// warm token/search cache instead of paying the cold path.
 //
 // All tasks are best-effort and run in parallel; a failure in any one task is
 // logged but never blocks server startup.
@@ -747,6 +748,15 @@ export const warmFatSecretCache = async ({ force = false, reason = "startup" } =
 
   warmFatSecretCachePromise = (async () => {
     const startedAt = Date.now();
+    const mealPlanWarmupTasks = MEAL_PLAN_WARMUP_QUERIES.flatMap((query) => [
+      searchFoodItems({ query, maxResults: 4, foodType: "generic" }, 4).catch((error) => {
+        console.warn(`[mealAPI] FatSecret warmup: meal-plan foods.search failed for "${query}" (non-fatal):`, error?.message || error);
+      }),
+      searchRecipes({ query, maxResults: 3 }, 3).catch((error) => {
+        console.warn(`[mealAPI] FatSecret warmup: meal-plan recipes.search failed for "${query}" (non-fatal):`, error?.message || error);
+      }),
+    ]);
+
     const warmupTasks = [
       // Pre-fetch the OAuth token so it is cached for the first user request.
       getAccessToken().catch((error) => {
@@ -761,6 +771,7 @@ export const warmFatSecretCache = async ({ force = false, reason = "startup" } =
       searchFoodItems("healthy", 10).catch((error) => {
         console.warn("[mealAPI] FatSecret warmup: foods.search failed (non-fatal):", error?.message || error);
       }),
+      ...mealPlanWarmupTasks,
     ];
 
     await Promise.allSettled(warmupTasks);
