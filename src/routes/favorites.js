@@ -34,6 +34,11 @@ const normalizeFavoriteItem = (item = {}) => ({
   servings: Number(item.servings) || 1,
 });
 
+const toNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 // 1. SAVE CUSTOM RECIPE (Used by your Recipe Detail Page)
 favoritesRoutes.post("/save-custom", async (req, res) => {
   try {
@@ -58,10 +63,10 @@ favoritesRoutes.post("/save-custom", async (req, res) => {
         prepTime: prepTime || 0,
         cookTime: cookTime || 0,
         servings: servings || 1,
-        calories: calories || 0,
-        protein: protein || 0,
-        carbs: carbs || 0,
-        fats: fats || 0,
+        calories: toNumber(calories),
+        protein: toNumber(protein),
+        carbs: toNumber(carbs),
+        fats: toNumber(fats),
         ingredients: ingredients, // Saves the array as JSON
         instructions: instructions // Saves the array as JSON
     });
@@ -273,14 +278,14 @@ favoritesRoutes.get("/custom/:id", async (req, res) => {
 favoritesRoutes.put("/update-recipe/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, ingredients, instructions } = req.body; // We mainly update these
+    const { title, calories, ingredients, instructions } = req.body; // We mainly update these
 
     await db.update(recipesTable)
       .set({ 
         title, 
+        calories: toNumber(calories),
         ingredients, 
         instructions,
-        // You can add macro updates here if you recalculate them
       })
       .where(eq(recipesTable.id, id));
 
