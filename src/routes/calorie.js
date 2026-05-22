@@ -350,6 +350,15 @@ const buildInsightsPayload = async (userId, dateStr, requestedWindow = 28, optio
 calorieRoutes.post("/create", async (req, res) => {
   try {
     const { clerkId, goalName, dailyCalories, description, startDate, endDate, notificationsEnabled } = req.body;
+    const startDateStr = normalizeDateString(startDate);
+    const endDateStr = normalizeDateString(endDate);
+
+    if (!startDateStr || !endDateStr) {
+      return res.status(400).json({ error: "Invalid goal date format. Use YYYY-MM-DD" });
+    }
+    if (endDateStr < startDateStr) {
+      return res.status(400).json({ error: "End date must be on or after start date" });
+    }
 
     const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
     if (user.length === 0) return res.status(404).json({ error: "User not found" });
@@ -360,8 +369,8 @@ calorieRoutes.post("/create", async (req, res) => {
       goalName,
       dailyCalories: parseInt(dailyCalories),
       description,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
+      startDate: startDateStr,
+      endDate: endDateStr,
       notificationsEnabled,
     });
 
@@ -421,6 +430,15 @@ calorieRoutes.put("/update/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { goalName, dailyCalories, description, startDate, endDate, notificationsEnabled } = req.body;
+    const startDateStr = normalizeDateString(startDate);
+    const endDateStr = normalizeDateString(endDate);
+
+    if (!startDateStr || !endDateStr) {
+      return res.status(400).json({ error: "Invalid goal date format. Use YYYY-MM-DD" });
+    }
+    if (endDateStr < startDateStr) {
+      return res.status(400).json({ error: "End date must be on or after start date" });
+    }
 
     await db
       .update(calorieGoalsTable)
@@ -428,8 +446,8 @@ calorieRoutes.put("/update/:id", async (req, res) => {
         goalName,
         dailyCalories: parseInt(dailyCalories),
         description,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: startDateStr,
+        endDate: endDateStr,
         notificationsEnabled,
         updatedAt: new Date(),
       })

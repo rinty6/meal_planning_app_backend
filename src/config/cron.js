@@ -2,7 +2,7 @@ import cron from "cron";
 import dotenv from "dotenv";
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "./db.js";
-import { calorieGoalsTable, mealLogsTable, usersTable } from "../db/schema.js";
+import { calorieGoalsTable, mealLogsTable, userDevicesTable, usersTable } from "../db/schema.js";
 import {
     cleanupOldNotifications,
     sendNotificationToUser,
@@ -12,7 +12,8 @@ import {
 dotenv.config();
 
 const NOTIFICATION_TIME_ZONE = process.env.NOTIFICATION_TIME_ZONE || "Australia/Adelaide";
-const DAILY_REMINDER_CRON = "0 12 * * *";
+const LUNCH_REMINDER_CRON = "0 12 * * *";
+const DINNER_REMINDER_CRON = "0 18 * * *";
 const DAILY_SUMMARY_CRON = "0 20 * * *";
 
 const toNumber = (value) => {
@@ -45,6 +46,42 @@ const getActiveNotificationGoals = async (dateStr) => {
         .orderBy(desc(calorieGoalsTable.createdAt));
 };
 
+const getLatestNotificationGoalForUser = async (userId) => {
+    const goals = await db
+        .select()
+        .from(calorieGoalsTable)
+        .where(eq(calorieGoalsTable.userId, userId))
+        .orderBy(desc(calorieGoalsTable.createdAt))
+        .limit(1);
+
+    const goal = goals[0] || null;
+    return goal?.notificationsEnabled ? goal : null;
+};
+
+const getReminderUserIds = async () => {
+    const deviceRows = await db
+        .select({ userId: userDevicesTable.userId })
+        .from(userDevicesTable);
+    const usersWithDevices = new Set(deviceRows.map((row) => row.userId).filter(Boolean));
+    if (usersWithDevices.size === 0) return [];
+
+    const goals = await db
+        .select({
+            userId: calorieGoalsTable.userId,
+            notificationsEnabled: calorieGoalsTable.notificationsEnabled,
+        })
+        .from(calorieGoalsTable)
+        .orderBy(desc(calorieGoalsTable.createdAt));
+
+    const latestPreferenceByUser = new Map();
+    for (const goal of goals) {
+        if (latestPreferenceByUser.has(goal.userId)) continue;
+        latestPreferenceByUser.set(goal.userId, Boolean(goal.notificationsEnabled));
+    }
+
+    return [...usersWithDevices].filter((userId) => latestPreferenceByUser.get(userId) === true);
+};
+
 const getLatestActiveNotificationGoalForUser = async (userId, dateStr) => {
     const goals = await db
         .select()
@@ -63,30 +100,51 @@ const getLatestActiveNotificationGoalForUser = async (userId, dateStr) => {
     return goals[0] || null;
 };
 
-// Runs at 12:00 PM in the configured notification time zone.
-const dailyReminderJob = new cron.CronJob(DAILY_REMINDER_CRON, async function () {
-    console.log("Running Daily Meal Reminder Push...");
+const sendMealReminder = async ({ mealType, title, body }) => {
     await cleanupOldNotifications();
 
     const today = getLocalYYYYMMDD();
-    const goals = await getActiveNotificationGoals(today);
-    const userIds = [...new Set(goals.map((goal) => goal.userId))];
+    const activeGoals = await getActiveNotificationGoals(today);
+    const userIds = await getReminderUserIds();
 
-    console.log("Daily reminder active notification users:", {
+    console.log("Daily meal reminder notification users:", {
         date: today,
+        mealType,
         count: userIds.length,
+        activeGoalCount: activeGoals.length,
     });
 
     if (userIds.length === 0) return;
 
     await sendNotificationToUsers({
         userIds,
-        title: "Meal Reminder",
-        body: "Don't forget to log your lunch. Stay on track with your goals!",
+        title,
+        body,
         data: {
-            type: "daily_reminder",
+            type: `${mealType}_reminder`,
+            mealType,
             screen: "/(tabs)/meal/summary",
         },
+    });
+};
+
+// Runs at 12:00 PM in the configured notification time zone.
+const lunchReminderJob = new cron.CronJob(LUNCH_REMINDER_CRON, async function () {
+    console.log("Running Lunch Meal Reminder Push...");
+    await sendMealReminder({
+        mealType: "lunch",
+        title: "Lunch Reminder",
+        body: "Don't forget to log your lunch. Stay on track with your goals!",
+    });
+}, null, false, NOTIFICATION_TIME_ZONE);
+
+// Runs at 6:00 PM in the configured notification time zone.
+const dinnerReminderJob = new cron.CronJob(DINNER_REMINDER_CRON, async function () {
+    console.log("Running Dinner Meal Reminder Push...");
+    await sendMealReminder({
+        mealType: "dinner",
+        title: "Dinner Reminder",
+        body: "Don't forget to log your dinner. Finish the day strong!",
     });
 }, null, false, NOTIFICATION_TIME_ZONE);
 
@@ -96,12 +154,14 @@ const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
     const today = getLocalYYYYMMDD();
     const users = await db.select().from(usersTable);
     let sentCount = 0;
-    let skippedWithoutActiveGoal = 0;
+    let skippedWithoutNotificationPreference = 0;
 
     for (const user of users) {
-        const goal = await getLatestActiveNotificationGoalForUser(user.userId, today);
+        const goal =
+            (await getLatestActiveNotificationGoalForUser(user.userId, today)) ||
+            (await getLatestNotificationGoalForUser(user.userId));
         if (!goal) {
-            skippedWithoutActiveGoal += 1;
+            skippedWithoutNotificationPreference += 1;
             continue;
         }
 
@@ -135,18 +195,21 @@ const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
         date: today,
         totalUsers: users.length,
         sentCount,
-        skippedWithoutActiveGoal,
+        skippedWithoutNotificationPreference,
     });
 }, null, false, NOTIFICATION_TIME_ZONE);
 
 const cronManager = {
     start: () => {
-        dailyReminderJob.start();
+        lunchReminderJob.start();
+        dinnerReminderJob.start();
         dailySummaryJob.start();
         console.log("Notification cron jobs started", {
             timeZone: NOTIFICATION_TIME_ZONE,
-            dailyReminder: "12:00",
-            dailyReminderCron: DAILY_REMINDER_CRON,
+            lunchReminder: "12:00",
+            lunchReminderCron: LUNCH_REMINDER_CRON,
+            dinnerReminder: "18:00",
+            dinnerReminderCron: DINNER_REMINDER_CRON,
             dailySummary: "20:00",
             dailySummaryCron: DAILY_SUMMARY_CRON,
         });

@@ -42,6 +42,20 @@ const getActiveGoalForDate = async (userId, dateStr) => {
 
   if (activeGoals.length > 0) return activeGoals[0];
 
+  const latestGoals = await db
+    .select()
+    .from(calorieGoalsTable)
+    .where(eq(calorieGoalsTable.userId, userId))
+    .orderBy(desc(calorieGoalsTable.createdAt))
+    .limit(1);
+  const latestGoal = latestGoals[0] || null;
+  if (latestGoal?.notificationsEnabled) {
+    return {
+      ...latestGoal,
+      notificationSource: "latest_notification_goal",
+    };
+  }
+
   return {
     dailyCalories: 2000,
     notificationsEnabled: false,
