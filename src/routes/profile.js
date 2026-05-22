@@ -7,6 +7,9 @@ import { eq } from "drizzle-orm";
 
 const profileRoutes = express.Router();
 
+const normalizeDisplayName = (value) =>
+    String(value || "").trim().replace(/\s+/g, " ");
+
 // Fetch the user's complete profileac
 profileRoutes.get("/:clerkId", async (req, res) => {
     try {
@@ -34,10 +37,9 @@ profileRoutes.get("/:clerkId", async (req, res) => {
              profileData.age = "N/A"; // Failsafe
         }
 
-        // Let the iOS NSURLCache serve repeated profile reads from the device
-        // for a short window. Same-device edits update the in-memory cache
-        // synchronously, so this only shortens cross-device / cold-cache reads.
-        res.set("Cache-Control", "private, max-age=30");
+        // Profile reads include editable user-facing identity, so avoid serving
+        // a stale name immediately after the profile screen saves a change.
+        res.set("Cache-Control", "no-store");
         res.json({
             user: user[0],
             demographics: profileData
@@ -45,6 +47,38 @@ profileRoutes.get("/:clerkId", async (req, res) => {
     } catch (error) {
         console.error("Error fetching profile:", error);
         res.status(500).json({ error: "Server error while fetching profile" });
+    }
+});
+
+// Update the user's display name in the app database.
+profileRoutes.put("/name/:clerkId", async (req, res) => {
+    try {
+        const { clerkId } = req.params;
+        const displayName = normalizeDisplayName(req.body?.name);
+
+        if (!displayName) {
+            return res.status(400).json({ error: "Name is required" });
+        }
+
+        const updatedUsers = await db
+            .update(usersTable)
+            .set({ username: displayName })
+            .where(eq(usersTable.clerkId, clerkId))
+            .returning();
+
+        if (updatedUsers.length === 0) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        res.set("Cache-Control", "no-store");
+        res.json({
+            success: true,
+            message: "Name updated successfully",
+            user: updatedUsers[0],
+        });
+    } catch (error) {
+        console.error("Error updating profile name:", error);
+        res.status(500).json({ error: "Failed to update profile name" });
     }
 });
 
