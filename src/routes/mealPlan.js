@@ -52,7 +52,9 @@ const MEAL_PLAN_QUERY_LIMIT = 3;
 const MEAL_PLAN_FOOD_SEARCH_LIMIT = 4;
 const MEAL_PLAN_RECIPE_SEARCH_LIMIT = 3;
 const MEAL_PLAN_FOOD_DETAIL_HYDRATION_LIMIT = 1;
-const MEAL_PLAN_SLOW_LOG_MS = 1500;
+// A cold FatSecret-backed all-meal build can take 2-3 seconds even with bounded
+// fan-out. Warn only when it becomes user-visible again.
+const MEAL_PLAN_SLOW_LOG_MS = 4000;
 
 mealPlanRoutes.use((req, res, next) => {
   delete req.headers["if-none-match"];

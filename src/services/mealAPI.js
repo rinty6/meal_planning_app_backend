@@ -101,6 +101,10 @@ const ensureArray = (value) => {
 const normalizeWord = (value) => String(value ?? "").trim().toLowerCase();
 // Reject non-FatSecret ids before they are proxied upstream.
 const isFatSecretNumericId = (value) => /^\d+$/.test(String(value ?? "").trim());
+const getFatSecretApiErrorStatus = (code, fallbackStatus = 502) => {
+  if (String(code ?? "") === "106") return 404;
+  return fallbackStatus;
+};
 
 const uniqueStrings = (values) => {
   const deduped = [];
@@ -248,17 +252,19 @@ const requestFatSecret = async (params, retryOnAuth = true) => {
   }
 
   if (!response.ok) {
+    const errorCode = data?.error?.code ?? `http_${response.status}`;
     throw new FatSecretApiError("FatSecret request failed.", {
-      status: response.status || 502,
-      code: data?.error?.code ?? `http_${response.status}`,
+      status: getFatSecretApiErrorStatus(errorCode, response.status || 502),
+      code: errorCode,
       details: data?.error?.message || data?.message || data || null,
     });
   }
 
   if (data?.error) {
+    const errorCode = data?.error?.code ?? null;
     throw new FatSecretApiError(data?.error?.message || "FatSecret API error.", {
-      status: 502,
-      code: data?.error?.code ?? null,
+      status: getFatSecretApiErrorStatus(errorCode, 502),
+      code: errorCode,
       details: data?.error || null,
     });
   }

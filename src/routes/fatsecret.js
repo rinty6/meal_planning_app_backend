@@ -30,7 +30,10 @@ const parseExpectedCalories = (value) => {
 };
 
 const respondWithFatSecretError = (res, error) => {
-  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 502;
+  const errorCode = String(error?.code ?? error?.details?.code ?? "");
+  const status = errorCode === "106"
+    ? 404
+    : Number.isFinite(Number(error?.status)) ? Number(error.status) : 502;
   return res.status(status).json(serializeFatSecretError(error));
 };
 

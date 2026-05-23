@@ -20,26 +20,41 @@ const normalizeMealType = (value) => {
   return MEAL_TYPES.includes(next) ? next : "";
 };
 
-const createAggregateItem = (meal, rawTitle, mealType) => ({
-  id: meal.externalId || "",
-  food_id: meal.source === "fatsecret_food" ? meal.externalId || "" : "",
-  recipe_id: meal.source === "fatsecret_recipe" ? meal.externalId || "" : "",
-  title: rawTitle,
-  food_name: rawTitle,
-  meal_type: mealType || meal.mealType || "",
-  count: 1,
-  number_appearance: 1,
-  image: meal.image || "",
-  externalId: meal.externalId || "",
-  source: meal.source || "",
-  servingId: meal.servingId || "",
-  servingDescription: meal.servingDescription || "",
-  nutrients: meal.nutrients || {},
-  calories: toNumber(meal.calories),
-  protein: toNumber(meal.protein),
-  carbs: toNumber(meal.carbs),
-  fats: toNumber(meal.fats),
-});
+const createAggregateItem = (meal, rawTitle, mealType) => {
+  const externalId = normalizeWhitespace(meal.externalId);
+  const source = normalizeKey(meal.source);
+  const isFatSecretFood = source === "fatsecret_food";
+  const isFatSecretRecipe = source === "fatsecret_recipe";
+  const displayId = isFatSecretFood
+    ? externalId
+    : isFatSecretRecipe && externalId
+      ? `recipe-${externalId}`
+      : externalId
+        ? `local-${externalId}`
+        : "";
+
+  return {
+    id: displayId,
+    food_id: isFatSecretFood ? externalId : "",
+    fatsecret_food_id: isFatSecretFood ? externalId : "",
+    recipe_id: isFatSecretRecipe ? externalId : "",
+    title: rawTitle,
+    food_name: rawTitle,
+    meal_type: mealType || meal.mealType || "",
+    count: 1,
+    number_appearance: 1,
+    image: meal.image || "",
+    externalId,
+    source: meal.source || "",
+    servingId: meal.servingId || "",
+    servingDescription: meal.servingDescription || "",
+    nutrients: meal.nutrients || {},
+    calories: toNumber(meal.calories),
+    protein: toNumber(meal.protein),
+    carbs: toNumber(meal.carbs),
+    fats: toNumber(meal.fats),
+  };
+};
 
 const addMealToAggregate = (aggregateMap, key, meal, rawTitle, mealType) => {
   const existing = aggregateMap.get(key);
