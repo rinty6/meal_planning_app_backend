@@ -6,6 +6,10 @@ import { userDevicesTable, usersTable } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { db } from "../config/db.js";
 import {
+    AccountDeletionError,
+    deleteAccountForClerkId,
+} from "../services/accountDeletion.js";
+import {
     bootstrapUserFromClerkId,
     getHasOnboarded,
     getUserByClerkId,
@@ -109,6 +113,51 @@ userRoutes.post('/bootstrap', requireClerkAuth, async (req, res) => {
         return res.status(500).json({
             error: "Internal server error",
             code: "USER_BOOTSTRAP_EXCEPTION",
+        });
+    }
+});
+
+userRoutes.delete('/me', requireClerkAuth, async (req, res) => {
+    const startedAt = Date.now();
+    const clerkId = req.auth?.clerkId || null;
+
+    try {
+        const deletionResult = await deleteAccountForClerkId(clerkId);
+
+        console.log("user.deleteAccount", {
+            level: "info",
+            phase: "complete",
+            clerkId,
+            userId: deletionResult.userId,
+            durationMs: Date.now() - startedAt,
+            deleted: deletionResult.deleted,
+            clerkDeleted: deletionResult.clerkDeleted,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Account deleted successfully.",
+        });
+    } catch (error) {
+        const isAccountDeletionError = error instanceof AccountDeletionError;
+        const status = isAccountDeletionError ? error.status : 500;
+        const code = isAccountDeletionError ? error.code : "ACCOUNT_DELETION_FAILED";
+
+        console.error("user.deleteAccount", {
+            level: "error",
+            phase: "failed",
+            clerkId,
+            durationMs: Date.now() - startedAt,
+            status,
+            code,
+            error: error?.message || "Unknown account deletion error",
+            details: isAccountDeletionError ? error.details : null,
+        });
+
+        return res.status(status || 500).json({
+            success: false,
+            error: error?.message || "Failed to delete account.",
+            code,
         });
     }
 });
