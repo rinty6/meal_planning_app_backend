@@ -48,6 +48,14 @@ let warmFatSecretCachePromise = null;
 let fatSecretCacheWarmedAt = 0;
 const FATSECRET_WARMUP_MIN_INTERVAL_MS = 25 * 60 * 1000;
 const MEAL_PLAN_WARMUP_QUERIES = ["breakfast", "lunch", "dinner"];
+const FATSECRET_TRANSIENT_NETWORK_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "EAI_AGAIN",
+]);
+const FATSECRET_TRANSIENT_RETRY_DELAY_MS = 250;
 
 const makeCacheKey = (prefix, values) => {
   const normalized = values.map((value) => String(value ?? "").trim().toLowerCase()).join("|");
@@ -148,6 +156,17 @@ const coerceFatSecretError = (error, fallbackMessage = "FatSecret request failed
         details: error?.message || String(error || ""),
       });
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isTransientFatSecretNetworkError = (error) => {
+  const code = String(error?.code || error?.cause?.code || "").toUpperCase();
+  const message = String(error?.message || error?.cause?.message || "");
+  return (
+    FATSECRET_TRANSIENT_NETWORK_CODES.has(code) ||
+    /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|EAI_AGAIN|socket hang up/i.test(message)
+  );
+};
+
 const pickBestServing = (servingArray = [], expectedCalories = 0) => {
   if (!servingArray.length) return {};
   let bestServing = servingArray[0] || {};
@@ -222,7 +241,7 @@ const getAccessToken = async (forceRefresh = false) => {
   }
 };
 
-const requestFatSecret = async (params, retryOnAuth = true) => {
+const requestFatSecret = async (params, retryOnAuth = true, retryOnNetwork = true) => {
   const token = await getAccessToken();
   if (!token) {
     throw new FatSecretApiError("FatSecret authentication failed.", {
@@ -231,13 +250,32 @@ const requestFatSecret = async (params, retryOnAuth = true) => {
     });
   }
 
-  const response = await fetch(`${API_URL}?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+  let response = null;
+  try {
+    response = await fetch(`${API_URL}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch (error) {
+    if (retryOnNetwork && isTransientFatSecretNetworkError(error)) {
+      console.warn("[mealAPI] retrying FatSecret request after transient network error", {
+        method: params.get("method"),
+        code: error?.code || error?.cause?.code || null,
+        message: error?.message || String(error || ""),
+      });
+      await delay(FATSECRET_TRANSIENT_RETRY_DELAY_MS);
+      return requestFatSecret(params, retryOnAuth, false);
+    }
+
+    throw new FatSecretApiError("FatSecret network request failed.", {
+      status: 502,
+      code: error?.code || error?.cause?.code || "network_error",
+      details: error?.message || String(error || ""),
+    });
+  }
 
   if (response.status === 401 && retryOnAuth) {
     await getAccessToken(true);
-    return requestFatSecret(params, false);
+    return requestFatSecret(params, false, retryOnNetwork);
   }
 
   let data = null;
