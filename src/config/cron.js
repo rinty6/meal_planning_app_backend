@@ -100,23 +100,29 @@ const getLatestActiveNotificationGoalForUser = async (userId, dateStr) => {
     return goals[0] || null;
 };
 
-const sendMealReminder = async ({ mealType, title, body }) => {
+const sendMealReminder = async ({ mealType, title, body, restrictToUserId = null }) => {
     await cleanupOldNotifications();
 
     const today = getLocalYYYYMMDD();
     const activeGoals = await getActiveNotificationGoals(today);
-    const userIds = await getReminderUserIds();
+    let userIds = await getReminderUserIds();
+    if (restrictToUserId != null) {
+        userIds = userIds.filter((userId) => userId === restrictToUserId);
+    }
 
     console.log("Daily meal reminder notification users:", {
         date: today,
         mealType,
         count: userIds.length,
         activeGoalCount: activeGoals.length,
+        restrictToUserId,
     });
 
-    if (userIds.length === 0) return;
+    if (userIds.length === 0) {
+        return { mealType, recipientCount: 0, sent: 0, invalidTokensRemoved: 0 };
+    }
 
-    await sendNotificationToUsers({
+    const result = await sendNotificationToUsers({
         userIds,
         title,
         body,
@@ -126,34 +132,56 @@ const sendMealReminder = async ({ mealType, title, body }) => {
             screen: "/(tabs)/meal/summary",
         },
     });
+
+    return {
+        mealType,
+        recipientCount: userIds.length,
+        sent: result?.sent ?? 0,
+        invalidTokensRemoved: result?.invalidTokensRemoved ?? 0,
+    };
 };
+
+// Named runners so the scheduled jobs AND the manual trigger endpoint
+// (routes/internal.js) share one implementation. `restrictToUserId` lets the
+// endpoint target a single user for testing without paging every device, while
+// still applying the real eligibility gate so recipientCount stays diagnostic.
+export const runLunchReminder = ({ restrictToUserId = null } = {}) =>
+    sendMealReminder({
+        mealType: "lunch",
+        title: "Lunch Reminder",
+        body: "Don't forget to log your lunch. Stay on track with your goals!",
+        restrictToUserId,
+    });
+
+export const runDinnerReminder = ({ restrictToUserId = null } = {}) =>
+    sendMealReminder({
+        mealType: "dinner",
+        title: "Dinner Reminder",
+        body: "Don't forget to log your dinner. Finish the day strong!",
+        restrictToUserId,
+    });
 
 // Runs at 12:00 PM in the configured notification time zone.
 const lunchReminderJob = new cron.CronJob(LUNCH_REMINDER_CRON, async function () {
     console.log("Running Lunch Meal Reminder Push...");
-    await sendMealReminder({
-        mealType: "lunch",
-        title: "Lunch Reminder",
-        body: "Don't forget to log your lunch. Stay on track with your goals!",
-    });
+    await runLunchReminder();
 }, null, false, NOTIFICATION_TIME_ZONE);
 
 // Runs at 6:00 PM in the configured notification time zone.
 const dinnerReminderJob = new cron.CronJob(DINNER_REMINDER_CRON, async function () {
     console.log("Running Dinner Meal Reminder Push...");
-    await sendMealReminder({
-        mealType: "dinner",
-        title: "Dinner Reminder",
-        body: "Don't forget to log your dinner. Finish the day strong!",
-    });
+    await runDinnerReminder();
 }, null, false, NOTIFICATION_TIME_ZONE);
 
 // Runs at 8:00 PM in the configured notification time zone.
-const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
-    console.log("Running Daily Calorie Summary Check...");
+export const runDailySummary = async ({ restrictToUserId = null } = {}) => {
     const today = getLocalYYYYMMDD();
-    const users = await db.select().from(usersTable);
+    let users = await db.select().from(usersTable);
+    if (restrictToUserId != null) {
+        users = users.filter((user) => user.userId === restrictToUserId);
+    }
     let sentCount = 0;
+    let totalSent = 0;
     let skippedWithoutNotificationPreference = 0;
 
     for (const user of users) {
@@ -177,7 +205,7 @@ const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
             ? `You went ${Math.round(consumed - target)} kcal over your goal. Tomorrow is a new day!`
             : `You stayed under your goal of ${target} kcal. Keep it up!`;
 
-        await sendNotificationToUser({
+        const result = await sendNotificationToUser({
             userId: user.userId,
             title,
             body,
@@ -187,7 +215,7 @@ const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
                 screen: "/(tabs)/profile/notifications",
             },
         });
-
+        totalSent += result?.sent ?? 0;
         sentCount += 1;
     }
 
@@ -196,7 +224,20 @@ const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
         totalUsers: users.length,
         sentCount,
         skippedWithoutNotificationPreference,
+        restrictToUserId,
     });
+
+    return {
+        recipientCount: sentCount,
+        sent: totalSent,
+        skippedWithoutNotificationPreference,
+    };
+};
+
+// Runs at 8:00 PM in the configured notification time zone.
+const dailySummaryJob = new cron.CronJob(DAILY_SUMMARY_CRON, async function () {
+    console.log("Running Daily Calorie Summary Check...");
+    await runDailySummary();
 }, null, false, NOTIFICATION_TIME_ZONE);
 
 const cronManager = {

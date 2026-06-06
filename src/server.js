@@ -20,6 +20,7 @@ import { warmFatSecretCache, warmFatSecretCacheInBackground } from './services/m
 import profileRoutes from './routes/profile.js';
 import deviceRoutes from './routes/devices.js';
 import notificationRoutes from './routes/notifications.js';
+import internalRoutes from './routes/internal.js';
 import primeRoutes from './routes/prime.js';
 
 import userRoutes from './routes/users.js';
@@ -160,6 +161,7 @@ app.use('/api/meal-plan', mealPlanRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/internal', internalRoutes);
 app.use('/api/prime', primeRoutes);
 app.use('/api/feedback', feedbackRoutes);
 
