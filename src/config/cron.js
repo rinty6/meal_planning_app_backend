@@ -65,6 +65,15 @@ const getReminderUserIds = async () => {
     const usersWithDevices = new Set(deviceRows.map((row) => row.userId).filter(Boolean));
     if (usersWithDevices.size === 0) return [];
 
+    // App-level master switch: users who turned notifications off get nothing.
+    // NULL (legacy rows) is treated as enabled.
+    const masterRows = await db
+        .select({ userId: usersTable.userId, master: usersTable.notificationsMasterEnabled })
+        .from(usersTable);
+    const masterDisabledUsers = new Set(
+        masterRows.filter((row) => row.master === false).map((row) => row.userId)
+    );
+
     const goals = await db
         .select({
             userId: calorieGoalsTable.userId,
@@ -79,7 +88,10 @@ const getReminderUserIds = async () => {
         latestPreferenceByUser.set(goal.userId, Boolean(goal.notificationsEnabled));
     }
 
-    return [...usersWithDevices].filter((userId) => latestPreferenceByUser.get(userId) === true);
+    return [...usersWithDevices].filter(
+        (userId) =>
+            !masterDisabledUsers.has(userId) && latestPreferenceByUser.get(userId) === true
+    );
 };
 
 const getLatestActiveNotificationGoalForUser = async (userId, dateStr) => {
@@ -183,8 +195,15 @@ export const runDailySummary = async ({ restrictToUserId = null } = {}) => {
     let sentCount = 0;
     let totalSent = 0;
     let skippedWithoutNotificationPreference = 0;
+    let skippedMasterDisabled = 0;
 
     for (const user of users) {
+        // App-level master switch overrides everything (NULL = enabled).
+        if (user.notificationsMasterEnabled === false) {
+            skippedMasterDisabled += 1;
+            continue;
+        }
+
         const goal =
             (await getLatestActiveNotificationGoalForUser(user.userId, today)) ||
             (await getLatestNotificationGoalForUser(user.userId));
@@ -224,6 +243,7 @@ export const runDailySummary = async ({ restrictToUserId = null } = {}) => {
         totalUsers: users.length,
         sentCount,
         skippedWithoutNotificationPreference,
+        skippedMasterDisabled,
         restrictToUserId,
     });
 
@@ -231,6 +251,7 @@ export const runDailySummary = async ({ restrictToUserId = null } = {}) => {
         recipientCount: sentCount,
         sent: totalSent,
         skippedWithoutNotificationPreference,
+        skippedMasterDisabled,
     };
 };
 

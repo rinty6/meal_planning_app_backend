@@ -51,6 +51,10 @@ export const usersTable = pgTable('user_info', {
     clerkId: text('clerk_id').notNull().unique(),
     email: text('email').notNull().unique(),
     username: text('name').notNull(),
+    // App-level master switch for all push notifications. Defaults ON so users
+    // who granted OS permission start opted-in; they can turn it off on the
+    // notifications page. NULL is treated as enabled in all gating logic.
+    notificationsMasterEnabled: boolean('notifications_master_enabled').default(true),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

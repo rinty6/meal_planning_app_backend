@@ -118,7 +118,7 @@ mealRoutes.post("/add", async (req, res) => {
     const exceededLimit = newTotalCalories > target;
 
     // Send push + save inbox history once when crossing the target threshold for the day.
-    if (goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && goal.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
@@ -187,7 +187,7 @@ mealRoutes.post("/add-batch", async (req, res) => {
     const reachedTarget = newTotalCalories >= target && previousTotalCalories < target;
     const exceededLimit = newTotalCalories > target;
 
-    if (goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && goal.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
