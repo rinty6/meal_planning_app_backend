@@ -55,6 +55,10 @@ export const usersTable = pgTable('user_info', {
     // who granted OS permission start opted-in; they can turn it off on the
     // notifications page. NULL is treated as enabled in all gating logic.
     notificationsMasterEnabled: boolean('notifications_master_enabled').default(true),
+    // IANA timezone reported by the user's device (e.g. "Australia/Perth").
+    // Used by the Phase 3 dispatcher to send reminders at each user's LOCAL time.
+    // Defaults to Adelaide until the device registers its real zone.
+    timezone: text('timezone').default('Australia/Adelaide'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
