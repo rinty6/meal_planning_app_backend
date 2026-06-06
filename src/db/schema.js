@@ -86,6 +86,23 @@ export const notificationsTable = pgTable('notifications', {
   userCreatedAtIdx: index('notifications_user_created_at_idx').on(table.userId, table.createdAt),
 }));
 
+// Dedup guard for the 15-minute reminder dispatcher. A unique (user, type, local
+// date) row is claimed before sending, so a reminder fires at most once per user
+// per local day even if the dispatcher ticks twice in the same local hour.
+export const notificationDispatchLogTable = pgTable('notification_dispatch_log', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  reminderType: text('reminder_type').notNull(), // breakfast | lunch | dinner | summary
+  localDate: text('local_date').notNull(),       // YYYY-MM-DD in the user's local zone
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  dispatchUniqueIdx: uniqueIndex('notification_dispatch_unique').on(
+    table.userId,
+    table.reminderType,
+    table.localDate
+  ),
+}));
+
 export const recommendationFeedbackTable = pgTable('recommendation_feedback', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),

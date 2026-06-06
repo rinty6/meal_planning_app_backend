@@ -21,14 +21,24 @@ import { eq } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { usersTable } from "../db/schema.js";
 import { ENV } from "../config/env.js";
-import { runLunchReminder, runDinnerReminder, runDailySummary } from "../config/cron.js";
+import {
+  runBreakfastReminder,
+  runLunchReminder,
+  runDinnerReminder,
+  runDailySummary,
+  runReminderDispatch,
+} from "../config/cron.js";
 
 const internalRoutes = express.Router();
 
 const JOB_RUNNERS = {
+  breakfast: runBreakfastReminder,
   lunch: runLunchReminder,
   dinner: runDinnerReminder,
   summary: runDailySummary,
+  // "dispatch" runs a full dispatcher tick (respects each user's local time + dedup);
+  // the individual meal jobs force-send immediately, ignoring time, for testing.
+  dispatch: runReminderDispatch,
 };
 
 const requireInternalSecret = (req, res, next) => {
