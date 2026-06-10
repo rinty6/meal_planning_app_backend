@@ -4,8 +4,23 @@ import dns from "node:dns/promises";
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import { ENV } from "../config/env.js";
+import { requireClerkAuth, attachUserFromAuth } from "../middleware/auth.js";
 
 const feedbackRoutes = express.Router();
+
+// Reject oversized image attachments (the /api/feedback route allows a 10 MB
+// body; cap the image itself well under that). ~8 MB of base64 ≈ ~6 MB image.
+const FEEDBACK_MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024;
+
+// Escape user-supplied text before embedding it in the HTML email so feedback
+// content cannot inject markup into the message sent to the team inbox.
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 const FEEDBACK_SMTP_HOST = "smtp.gmail.com";
 const FEEDBACK_SMTP_PORT = 465;
 const FEEDBACK_SMTP_CONNECTION_TIMEOUT_MS = 8_000;
@@ -66,11 +81,11 @@ const buildFeedbackMailPayload = ({ clerkId, userEmail, feedbackText, imageBase6
   // Build one normalized payload so SMTP and HTTPS providers send the same content.
   const emailContent = `
       <h2>New Feedback Submission</h2>
-      <p><strong>From User:</strong> ${userEmail}</p>
-      <p><strong>Clerk ID:</strong> ${clerkId || 'N/A'}</p>
+      <p><strong>From User:</strong> ${escapeHtml(userEmail)}</p>
+      <p><strong>Clerk ID:</strong> ${escapeHtml(clerkId) || 'N/A'}</p>
       <hr />
       <h3>Feedback:</h3>
-      <p>${feedbackText.replace(/\n/g, '<br>')}</p>
+      <p>${escapeHtml(feedbackText).replace(/\n/g, '<br>')}</p>
       <hr />
       <p><em>Submitted at: ${new Date().toLocaleString()}</em></p>
     `;
@@ -152,9 +167,13 @@ const sendFeedbackBySmtp = async ({ mailConfig, userEmail, payload }) => {
 };
 
 // ENDPOINT: POST /api/feedback/submit
-feedbackRoutes.post('/submit', async (req, res) => {
+feedbackRoutes.post('/submit', requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, userEmail, feedbackText, imageBase64 } = req.body;
+    const { feedbackText, imageBase64 } = req.body;
+    // Identity comes from the verified Clerk session, not the request body, so
+    // feedback email can only be cc'd / replied-to the authenticated user.
+    const clerkId = req.auth.clerkId;
+    const userEmail = req.dbUser.email;
     const mailConfig = getFeedbackMailConfig();
     const feedbackProvider = getFeedbackProvider(mailConfig);
 
@@ -165,6 +184,13 @@ feedbackRoutes.post('/submit', async (req, res) => {
 
     if (!userEmail) {
       return res.status(400).json({ error: "User email is required" });
+    }
+
+    if (typeof imageBase64 === "string" && imageBase64.length > FEEDBACK_MAX_IMAGE_BASE64_CHARS) {
+      return res.status(413).json({
+        error: "Attached image is too large. Please attach a smaller image.",
+        code: "FEEDBACK_IMAGE_TOO_LARGE",
+      });
     }
 
     if (!mailConfig.recipient) {

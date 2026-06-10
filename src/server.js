@@ -3,6 +3,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 import { ENV } from './config/env.js';
+import helmet from 'helmet';
+import {
+  globalLimiter,
+  feedbackLimiter,
+  recommendationLimiter,
+  fatSecretLimiter,
+  primeLimiter,
+  bootstrapLimiter,
+} from './middleware/rateLimit.js';
 import job from './config/cron.js';
 import demographicsRoutes from './routes/demographics.js';
 import mealRoutes from './routes/meals.js';
@@ -65,6 +74,22 @@ const buildRuntimeHealthPayload = () => {
   };
 };
 
+const requireInternalSecret = (req, res, next) => {
+  const secret = ENV.INTERNAL_TRIGGER_SECRET;
+  if (!secret) {
+    return res
+      .status(503)
+      .json({ error: "Runtime telemetry disabled: INTERNAL_TRIGGER_SECRET is not configured" });
+  }
+
+  const provided = req.headers["x-internal-secret"];
+  if (!provided || String(provided) !== String(secret)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  return next();
+};
+
 const shouldLogMissingRoute = (method, path) => {
   const cacheKey = `${method}:${path}`;
   const now = Date.now();
@@ -94,9 +119,14 @@ const shouldStartScheduledJobs = () => {
   return explicitlyEnabled || ENV.NODE_ENV === "production" || isRailwayRuntime;
 };
 
-// Increased limit to 50mb to handle Base64 images
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Trust the Railway/edge proxy so rate limiting and req.ip use the real client
+// IP (X-Forwarded-For), not the proxy address. `1` trusts only the first hop.
+app.set('trust proxy', 1);
+
+// Security headers. CSP is disabled: this service is a JSON API plus one static
+// privacy-policy page, so a strict CSP would risk breaking that page without
+// adding meaningful protection to API responses.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 if (shouldStartScheduledJobs()) {
   job.start();
@@ -114,8 +144,6 @@ if (shouldStartScheduledJobs()) {
     notificationsCronDisabled: process.env.NOTIFICATIONS_CRON_DISABLED || null,
   });
 }
-
-app.use(express.json());
 
 // Serve a stable root response so platform probes do not fail on `/`.
 app.get('/', (req, res) => {
@@ -144,10 +172,32 @@ app.get("/api/health", (req, res) => {
   res.status(200).json(buildHealthPayload());
 });
 
-// Mirror backend process telemetry on a dedicated route for Phase 10 runtime measurement.
-app.get('/api/health/runtime', (req, res) => {
+// Mirror backend process telemetry on a guarded route for ops checks.
+// Keep /health and /api/health public; this endpoint exposes process details.
+app.get('/api/health/runtime', requireInternalSecret, (req, res) => {
   res.status(200).json(buildRuntimeHealthPayload());
 });
+
+// Global rate-limit ceiling for all API routes. Health checks above are defined
+// earlier, so they remain exempt.
+app.use('/api', globalLimiter);
+
+// Tighter per-route limiters on abuse-prone / expensive surfaces.
+app.use('/api/users/bootstrap', bootstrapLimiter);
+app.use('/api/recommendation', recommendationLimiter);
+app.use('/api/fatsecret', fatSecretLimiter);
+app.use('/api/meal-plan', recommendationLimiter);
+app.use('/api/prime', primeLimiter);
+app.use('/api/feedback', feedbackLimiter);
+
+// Body limits: a tight 1 MB default protects the ~40 JSON routes; the two routes
+// that legitimately accept base64 images (feedback photo, manual-food photo) get
+// a 10 MB cap. Previously every route accepted 50 MB. Limiters are mounted first
+// so rejected floods do not need body parsing.
+app.use('/api/feedback', express.json({ limit: '10mb' }));
+app.use('/api/meals', express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
 app.use('/api/users', userRoutes);
 app.use('/api/demographics', demographicsRoutes)
