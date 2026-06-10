@@ -2,9 +2,10 @@
 
 import express from "express";
 import { db } from "../config/db.js";
-import { calorieGoalsTable, usersTable, mealLogsTable, demographicsTable } from "../db/schema.js";
+import { calorieGoalsTable, mealLogsTable, demographicsTable } from "../db/schema.js";
 import { and, lte, gte, desc, eq } from "drizzle-orm";
 import { buildCalorieInsights } from "../services/calorieInsights.js";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const calorieRoutes = express.Router();
 const DEFAULT_DAILY_CALORIES = 2000;
@@ -347,9 +348,9 @@ const buildInsightsPayload = async (userId, dateStr, requestedWindow = 28, optio
 };
 
 // 1. CREATE NEW GOAL
-calorieRoutes.post("/create", async (req, res) => {
+calorieRoutes.post("/create", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, goalName, dailyCalories, description, startDate, endDate, notificationsEnabled } = req.body;
+    const { goalName, dailyCalories, description, startDate, endDate, notificationsEnabled } = req.body;
     const startDateStr = normalizeDateString(startDate);
     const endDateStr = normalizeDateString(endDate);
 
@@ -360,9 +361,7 @@ calorieRoutes.post("/create", async (req, res) => {
       return res.status(400).json({ error: "End date must be on or after start date" });
     }
 
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     await db.insert(calorieGoalsTable).values({
       userId,
@@ -382,13 +381,9 @@ calorieRoutes.post("/create", async (req, res) => {
 });
 
 // 2. GET ALL GOALS FOR USER
-calorieRoutes.get("/list/:clerkId", async (req, res) => {
+calorieRoutes.get("/list/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId } = req.params;
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     const goals = await db.select().from(calorieGoalsTable).where(eq(calorieGoalsTable.userId, userId));
 
@@ -413,10 +408,13 @@ calorieRoutes.get("/list/:clerkId", async (req, res) => {
 });
 
 // 3. GET SINGLE GOAL (For Editing)
-calorieRoutes.get("/detail/:id", async (req, res) => {
+calorieRoutes.get("/detail/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const goal = await db.select().from(calorieGoalsTable).where(eq(calorieGoalsTable.id, id));
+    const goal = await db
+      .select()
+      .from(calorieGoalsTable)
+      .where(and(eq(calorieGoalsTable.id, id), eq(calorieGoalsTable.userId, req.dbUser.userId)));
     if (goal.length === 0) return res.status(404).json({ error: "Goal not found" });
     res.json(goal[0]);
   } catch (error) {
@@ -426,7 +424,7 @@ calorieRoutes.get("/detail/:id", async (req, res) => {
 });
 
 // 4. UPDATE GOAL
-calorieRoutes.put("/update/:id", async (req, res) => {
+calorieRoutes.put("/update/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { goalName, dailyCalories, description, startDate, endDate, notificationsEnabled } = req.body;
@@ -440,7 +438,7 @@ calorieRoutes.put("/update/:id", async (req, res) => {
       return res.status(400).json({ error: "End date must be on or after start date" });
     }
 
-    await db
+    const updated = await db
       .update(calorieGoalsTable)
       .set({
         goalName,
@@ -451,7 +449,12 @@ calorieRoutes.put("/update/:id", async (req, res) => {
         notificationsEnabled,
         updatedAt: new Date(),
       })
-      .where(eq(calorieGoalsTable.id, id));
+      .where(and(eq(calorieGoalsTable.id, id), eq(calorieGoalsTable.userId, req.dbUser.userId)))
+      .returning();
+
+    if (updated.length === 0) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
 
     res.json({ success: true, message: "Goal updated successfully" });
   } catch (error) {
@@ -461,10 +464,16 @@ calorieRoutes.put("/update/:id", async (req, res) => {
 });
 
 // 5. DELETE GOAL
-calorieRoutes.delete("/delete/:id", async (req, res) => {
+calorieRoutes.delete("/delete/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.delete(calorieGoalsTable).where(eq(calorieGoalsTable.id, id));
+    const deleted = await db
+      .delete(calorieGoalsTable)
+      .where(and(eq(calorieGoalsTable.id, id), eq(calorieGoalsTable.userId, req.dbUser.userId)))
+      .returning();
+    if (deleted.length === 0) {
+      return res.status(404).json({ error: "Goal not found" });
+    }
     res.json({ success: true, message: "Goal deleted" });
   } catch (error) {
     console.error("Delete Goal Error:", error);
@@ -473,16 +482,13 @@ calorieRoutes.delete("/delete/:id", async (req, res) => {
 });
 
 // 6. GET DAILY SUMMARY (Goal vs Actual)
-calorieRoutes.get("/summary/:clerkId/:date", async (req, res) => {
+calorieRoutes.get("/summary/:clerkId/:date", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, date } = req.params;
+    const { date } = req.params;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
-    // 1. Get user ID
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     res.json(await buildDailySummaryPayload(userId, dateStr));
   } catch (error) {
@@ -491,15 +497,13 @@ calorieRoutes.get("/summary/:clerkId/:date", async (req, res) => {
   }
 });
 
-calorieRoutes.get("/dashboard/:clerkId/:date", async (req, res) => {
+calorieRoutes.get("/dashboard/:clerkId/:date", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, date } = req.params;
+    const { date } = req.params;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     const targetContextPromise = getDailyCalorieTargetContext(userId, dateStr);
     const weeklyPromise = buildWeeklyPayload(userId, dateStr);
@@ -521,16 +525,13 @@ calorieRoutes.get("/dashboard/:clerkId/:date", async (req, res) => {
 });
 
 // 7. GET WEEKLY CALORIE HISTORY
-calorieRoutes.get("/weekly/:clerkId/:date", async (req, res) => {
+calorieRoutes.get("/weekly/:clerkId/:date", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, date } = req.params;
+    const { date } = req.params;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
-    // 1. Get user
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     res.json(await buildWeeklyPayload(userId, dateStr));
   } catch (error) {
@@ -539,18 +540,16 @@ calorieRoutes.get("/weekly/:clerkId/:date", async (req, res) => {
   }
 });
 
-calorieRoutes.get("/insights/:clerkId/:date", async (req, res) => {
+calorieRoutes.get("/insights/:clerkId/:date", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, date } = req.params;
+    const { date } = req.params;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
     const requestedWindow = Number.parseInt(String(req.query.window || "28"), 10);
     const windowDays = Math.min(84, Math.max(7, Number.isFinite(requestedWindow) ? requestedWindow : 28));
 
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     res.json(await buildInsightsPayload(userId, dateStr, windowDays));
   } catch (error) {

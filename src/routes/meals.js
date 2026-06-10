@@ -2,10 +2,11 @@
 
 import express from "express";
 import { db } from "../config/db.js";
-import { mealLogsTable, usersTable, calorieGoalsTable } from "../db/schema.js";
+import { mealLogsTable, calorieGoalsTable } from "../db/schema.js";
 import { eq, and, desc, lte, gte } from "drizzle-orm";
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const mealRoutes = express.Router();
 
@@ -25,11 +26,6 @@ const parsePositiveIntegerId = (value) => {
   if (!/^\d+$/.test(raw)) return null;
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
-const getUserByClerkId = async (clerkId) => {
-  const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-  return user.length > 0 ? user[0] : null;
 };
 
 const getActiveGoalForDate = async (userId, dateStr) => {
@@ -62,7 +58,7 @@ const getActiveGoalForDate = async (userId, dateStr) => {
   };
 };
 
-mealRoutes.post("/add", async (req, res) => {
+mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     const {
       clerkId,
@@ -83,8 +79,7 @@ mealRoutes.post("/add", async (req, res) => {
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const insertedMeals = await db.insert(mealLogsTable).values({
       userId: user.userId,
@@ -142,7 +137,7 @@ mealRoutes.post("/add", async (req, res) => {
   }
 });
 
-mealRoutes.post("/add-batch", async (req, res) => {
+mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId, date, mealType, items } = req.body;
     const dateStr = normalizeDateString(date);
@@ -151,8 +146,7 @@ mealRoutes.post("/add-batch", async (req, res) => {
       return res.status(400).json({ error: "At least one meal item is required" });
     }
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const mealRows = items.map((item) => ({
       userId: user.userId,
@@ -211,14 +205,13 @@ mealRoutes.post("/add-batch", async (req, res) => {
   }
 });
 
-mealRoutes.get("/summary/:clerkId/:date", async (req, res) => {
+mealRoutes.get("/summary/:clerkId/:date", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId, date } = req.params;
     const dateStr = normalizeDateString(date);
     if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const meals = await db
       .select()
@@ -232,13 +225,19 @@ mealRoutes.get("/summary/:clerkId/:date", async (req, res) => {
   }
 });
 
-mealRoutes.delete("/delete/:id", async (req, res) => {
+mealRoutes.delete("/delete/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const id = parsePositiveIntegerId(req.params.id);
     if (!id) {
       return res.status(400).json({ error: "Invalid meal log id" });
     }
-    await db.delete(mealLogsTable).where(eq(mealLogsTable.id, id));
+    const deleted = await db
+      .delete(mealLogsTable)
+      .where(and(eq(mealLogsTable.id, id), eq(mealLogsTable.userId, req.dbUser.userId)))
+      .returning();
+    if (deleted.length === 0) {
+      return res.status(404).json({ error: "Meal not found" });
+    }
     res.status(200).json({ success: true, message: "Item deleted" });
   } catch (error) {
     console.error("Error deleting item:", error);
@@ -253,13 +252,12 @@ mealRoutes.delete("/delete/:id", async (req, res) => {
 // silently (env not set, transient outage), the strip on the meal planner stays
 // empty. Computing it here keeps the UI populated as long as Node can read
 // meal_logs.
-mealRoutes.get("/most-consumed/:clerkId", async (req, res) => {
+mealRoutes.get("/most-consumed/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId } = req.params;
     const limit = Math.max(1, Math.min(20, Number(req.query.limit) || 10));
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const mostConsumed = await getMostConsumedForUser(user.userId, { limit });
 
@@ -270,11 +268,9 @@ mealRoutes.get("/most-consumed/:clerkId", async (req, res) => {
   }
 });
 
-mealRoutes.get("/recent/:clerkId", async (req, res) => {
+mealRoutes.get("/recent/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId } = req.params;
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const meals = await db
       .select()

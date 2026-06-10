@@ -4,8 +4,9 @@
 
 import express from "express";
 import { db } from "../config/db.js";
-import { usersTable, recipesTable, favouritesTable } from "../db/schema.js";
+import { recipesTable, favouritesTable } from "../db/schema.js";
 import { eq, and } from "drizzle-orm";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const favoritesRoutes = express.Router();
 
@@ -40,7 +41,7 @@ const toNumber = (value) => {
 };
 
 // 1. SAVE CUSTOM RECIPE (Used by your Recipe Detail Page)
-favoritesRoutes.post("/save-custom", async (req, res) => {
+favoritesRoutes.post("/save-custom", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     const { 
         clerkId, externalId, title, image, 
@@ -49,10 +50,7 @@ favoritesRoutes.post("/save-custom", async (req, res) => {
         ingredients, instructions 
     } = req.body;
 
-    // Get User ID
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     // Insert into 'recipes' table (The one with JSON support)
     await db.insert(recipesTable).values({
@@ -80,14 +78,12 @@ favoritesRoutes.post("/save-custom", async (req, res) => {
 });
 
 // 2. TOGGLE STANDARD FAVORITE (For the Heart Icon on the Grid Page)
-favoritesRoutes.post("/toggle", async (req, res) => {
+favoritesRoutes.post("/toggle", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     // We expect 'item' to contain food details
     const { clerkId, item } = req.body;
     
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
     const normalizedItem = normalizeFavoriteItem(item || {});
 
     // Check if it exists (using externalId)
@@ -123,16 +119,14 @@ favoritesRoutes.post("/toggle", async (req, res) => {
 });
 
 // 3. SAVE ALL ITEMS OF A COMBO TO FAVORITES (idempotent add)
-favoritesRoutes.post("/save-combo", async (req, res) => {
+favoritesRoutes.post("/save-combo", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId, items } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: "No combo items supplied" });
     }
 
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     let savedCount = 0;
     let skippedCount = 0;
@@ -178,12 +172,10 @@ favoritesRoutes.post("/save-combo", async (req, res) => {
 });
 
 // 4. CHECK FAVORITE STATUS
-favoritesRoutes.get("/check/:clerkId/:recipeId", async (req, res) => {
+favoritesRoutes.get("/check/:clerkId/:recipeId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
     try {
       const { clerkId, recipeId } = req.params;
-      const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-      if (user.length === 0) return res.json({ isFavorite: false });
-      const userId = user[0].userId;
+      const userId = req.dbUser.userId;
   
       const existing = await db.select().from(favouritesTable).where(and(
           eq(favouritesTable.userId, userId),
@@ -197,14 +189,11 @@ favoritesRoutes.get("/check/:clerkId/:recipeId", async (req, res) => {
 });
 
 // 5. GET ALL FAVORITES (Separated by type)
-favoritesRoutes.get("/list/:clerkId", async (req, res) => {
+favoritesRoutes.get("/list/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId } = req.params;
 
-    // 1. Get User ID
-    const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-    if (user.length === 0) return res.status(404).json({ error: "User not found" });
-    const userId = user[0].userId;
+    const userId = req.dbUser.userId;
 
     // 2. Fetch Simple Favorites (Hearted items from Grid)
     const favFoods = await db
@@ -236,10 +225,16 @@ favoritesRoutes.get("/list/:clerkId", async (req, res) => {
 });
 
 // 6. DELETE FAVORITE FOOD (Simple Item)
-favoritesRoutes.delete("/delete-food/:id", async (req, res) => {
+favoritesRoutes.delete("/delete-food/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.delete(favouritesTable).where(eq(favouritesTable.id, id));
+    const deleted = await db
+      .delete(favouritesTable)
+      .where(and(eq(favouritesTable.id, id), eq(favouritesTable.userId, req.dbUser.userId)))
+      .returning();
+    if (deleted.length === 0) {
+      return res.status(404).json({ error: "Favorite not found" });
+    }
     res.status(200).json({ success: true, message: "Food removed from favorites" });
   } catch (error) {
     console.error("Delete Food Error:", error);
@@ -248,10 +243,16 @@ favoritesRoutes.delete("/delete-food/:id", async (req, res) => {
 });
 
 // 7. DELETE SAVED RECIPE (Custom Detailed Recipe)
-favoritesRoutes.delete("/delete-recipe/:id", async (req, res) => {
+favoritesRoutes.delete("/delete-recipe/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    await db.delete(recipesTable).where(eq(recipesTable.id, id));
+    const deleted = await db
+      .delete(recipesTable)
+      .where(and(eq(recipesTable.id, id), eq(recipesTable.userId, req.dbUser.userId)))
+      .returning();
+    if (deleted.length === 0) {
+      return res.status(404).json({ error: "Recipe not found" });
+    }
     res.status(200).json({ success: true, message: "Recipe deleted" });
   } catch (error) {
     console.error("Delete Recipe Error:", error);
@@ -260,11 +261,14 @@ favoritesRoutes.delete("/delete-recipe/:id", async (req, res) => {
 });
 
 // 8. GET FULL CUSTOM RECIPE DETAILS (For Editing)
-favoritesRoutes.get("/custom/:id", async (req, res) => {
+favoritesRoutes.get("/custom/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const recipe = await db.select().from(recipesTable).where(eq(recipesTable.id, id));
-    
+    const recipe = await db
+      .select()
+      .from(recipesTable)
+      .where(and(eq(recipesTable.id, id), eq(recipesTable.userId, req.dbUser.userId)));
+
     if (recipe.length === 0) return res.status(404).json({ error: "Recipe not found" });
     
     res.json(recipe[0]);
@@ -275,19 +279,24 @@ favoritesRoutes.get("/custom/:id", async (req, res) => {
 });
 
 // 9. UPDATE CUSTOM RECIPE
-favoritesRoutes.put("/update-recipe/:id", async (req, res) => {
+favoritesRoutes.put("/update-recipe/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, calories, ingredients, instructions } = req.body; // We mainly update these
 
-    await db.update(recipesTable)
-      .set({ 
-        title, 
+    const updated = await db.update(recipesTable)
+      .set({
+        title,
         calories: toNumber(calories),
-        ingredients, 
+        ingredients,
         instructions,
       })
-      .where(eq(recipesTable.id, id));
+      .where(and(eq(recipesTable.id, id), eq(recipesTable.userId, req.dbUser.userId)))
+      .returning();
+
+    if (updated.length === 0) {
+      return res.status(404).json({ error: "Recipe not found" });
+    }
 
     res.status(200).json({ success: true, message: "Recipe updated" });
   } catch (error) {

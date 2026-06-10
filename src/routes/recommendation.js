@@ -19,6 +19,7 @@ import {
 import { buildRecommendationResponsePayload } from "./recommendation/responseBuilder.js";
 import { enrichRecommendationImages } from "../services/mealAPI.js";
 import { createTtlCache } from "../utils/ttlCache.js";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const recommendationRoutes = express.Router();
 const RECOMMENDATION_DEBUG_LOGS = process.env.RECOMMENDATION_DEBUG_LOGS === "1";
@@ -42,7 +43,7 @@ const normalizeSnapshotMealType = (mealType) => {
   return MEAL_TYPES.includes(normalizedMealType) ? normalizedMealType : null;
 };
 
-recommendationRoutes.get("/:clerkId", async (req, res) => {
+recommendationRoutes.get("/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     const routeStartedAt = Date.now();
     const { clerkId } = req.params;
@@ -60,8 +61,7 @@ recommendationRoutes.get("/:clerkId", async (req, res) => {
       }
     }
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const [feedback, demo, calorieTarget, favoriteTitles] = await Promise.all([
       getRecommendationFeedbackProfile(user.userId, 400),
@@ -221,7 +221,7 @@ recommendationRoutes.post("/__frozen/replay", async (req, res) => {
   }
 });
 
-recommendationRoutes.post("/feedback", async (req, res) => {
+recommendationRoutes.post("/feedback", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     const { clerkId, comboId, mealType, status, ml_tag, explanation, itemTitle, itemTitles } = req.body || {};
     const normalizedStatus = String(status || "").trim();
@@ -230,8 +230,7 @@ recommendationRoutes.post("/feedback", async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid feedback payload." });
     }
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     await recordRecommendationFeedback({
       userId: user.userId,

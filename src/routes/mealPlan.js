@@ -12,6 +12,7 @@ import {
 import { getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const mealPlanRoutes = express.Router();
 
@@ -790,11 +791,10 @@ const recordShownEvents = ({ user, clerkId, recommendationsByMeal, preferences }
   });
 };
 
-mealPlanRoutes.get("/preferences/:clerkId", async (req, res) => {
+mealPlanRoutes.get("/preferences/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     await ensureMealPlanStorage();
-    const user = await getUserByClerkId(req.params.clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const preferences = await getSavedPreferences(user.userId);
     return res.status(200).json(serializePreferencesResponse(preferences));
@@ -804,11 +804,10 @@ mealPlanRoutes.get("/preferences/:clerkId", async (req, res) => {
   }
 });
 
-mealPlanRoutes.put("/preferences/:clerkId", async (req, res) => {
+mealPlanRoutes.put("/preferences/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     await ensureMealPlanStorage();
-    const user = await getUserByClerkId(req.params.clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const preferences = normalizePreferences(req.body?.preferences || req.body || {});
     await db
@@ -837,13 +836,12 @@ mealPlanRoutes.put("/preferences/:clerkId", async (req, res) => {
   }
 });
 
-mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
+mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
     const requestStartedAt = Date.now();
     await ensureMealPlanStorage();
     const { clerkId } = req.params;
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const selectedMealType = normalizeMealType(req.query.mealType);
     const forceExploration = parseBool(req.query.force_exploration) || parseBool(req.query.forceExploration);
@@ -957,7 +955,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", async (req, res) => {
   }
 });
 
-mealPlanRoutes.post("/events", async (req, res) => {
+mealPlanRoutes.post("/events", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
     await ensureMealPlanStorage();
     const clerkId = normalizeWhitespace(req.body?.clerkId);
@@ -966,8 +964,7 @@ mealPlanRoutes.post("/events", async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid event payload." });
     }
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = req.dbUser;
 
     const count = await recordEvents({
       user,

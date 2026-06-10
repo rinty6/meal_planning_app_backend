@@ -4,6 +4,7 @@ import express from "express";
 import { db } from "../config/db.js";
 import { usersTable, demographicsTable } from "../db/schema.js";
 import { eq } from "drizzle-orm";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const profileRoutes = express.Router();
 
@@ -11,13 +12,10 @@ const normalizeDisplayName = (value) =>
     String(value || "").trim().replace(/\s+/g, " ");
 
 // Fetch the user's complete profileac
-profileRoutes.get("/:clerkId", async (req, res) => {
+profileRoutes.get("/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
     try {
-        const { clerkId } = req.params;
-        const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-        
-        if (user.length === 0) return res.status(404).json({ error: "User not found" });
-        const userId = user[0].userId;
+        const userRecord = req.dbUser;
+        const userId = userRecord.userId;
 
         const demographics = await db.select().from(demographicsTable).where(eq(demographicsTable.userId, userId)).limit(1);
 
@@ -41,7 +39,7 @@ profileRoutes.get("/:clerkId", async (req, res) => {
         // a stale name immediately after the profile screen saves a change.
         res.set("Cache-Control", "no-store");
         res.json({
-            user: user[0],
+            user: userRecord,
             demographics: profileData
         });
     } catch (error) {
@@ -51,9 +49,8 @@ profileRoutes.get("/:clerkId", async (req, res) => {
 });
 
 // Update the user's display name in the app database.
-profileRoutes.put("/name/:clerkId", async (req, res) => {
+profileRoutes.put("/name/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
     try {
-        const { clerkId } = req.params;
         const displayName = normalizeDisplayName(req.body?.name);
 
         if (!displayName) {
@@ -63,7 +60,7 @@ profileRoutes.put("/name/:clerkId", async (req, res) => {
         const updatedUsers = await db
             .update(usersTable)
             .set({ username: displayName })
-            .where(eq(usersTable.clerkId, clerkId))
+            .where(eq(usersTable.userId, req.dbUser.userId))
             .returning();
 
         if (updatedUsers.length === 0) {
@@ -83,14 +80,10 @@ profileRoutes.put("/name/:clerkId", async (req, res) => {
 });
 
 // Update the user's physical demographics
-profileRoutes.put("/update/:clerkId", async (req, res) => {
+profileRoutes.put("/update/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
     try {
-        const { clerkId } = req.params;
         const { weight, height, age, gender, activityLevel, goal } = req.body;
-
-        const user = await db.select().from(usersTable).where(eq(usersTable.clerkId, clerkId)).limit(1);
-        if (user.length === 0) return res.status(404).json({ error: "User not found" });
-        const userId = user[0].userId;
+        const userId = req.dbUser.userId;
 
         // Update the demographics table
         await db.update(demographicsTable).set({

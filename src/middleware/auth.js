@@ -48,7 +48,21 @@ export const requireClerkAuth = async (req, res, next) => {
         phase: 'missing-secret-key',
         durationMs: Date.now() - authStartedAt,
         fallbackClerkIdPresent: !!fallbackClerkId,
+        devFallbackAllowed,
       });
+
+      // Fail closed in production: never accept caller-asserted identity
+      // (x-clerk-id / body.clerkId / params.clerkId) when no valid Clerk secret
+      // key is configured. The fallback below is a local-development convenience
+      // only and must not run in production.
+      if (!devFallbackAllowed) {
+        return res
+          .status(401)
+          .json({
+            error:
+              "Server authentication is not configured. CLERK_SECRET_KEY (sk_*) is required in production.",
+          });
+      }
 
       if (!fallbackClerkId) {
         return res

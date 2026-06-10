@@ -8,6 +8,7 @@ import {
   primeMlContextAndWait,
 } from "./recommendation/dataAccess.js";
 import { parseBool } from "./recommendation/helpers.js";
+import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const primeRoutes = express.Router();
 const DEFAULT_PRIME_WAIT_TIMEOUT_MS = 25_000;
@@ -62,19 +63,18 @@ const resolvePrimeContext = async ({ clerkId, userId, demographics }) => {
   };
 };
 
-primeRoutes.post("/", async (req, res) => {
+primeRoutes.post("/", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId, userId, demographics, mealType } = req.body || {};
+    const { mealType } = req.body || {};
     const waitForWarmup = parseBool(req.body?.waitForWarmup) || parseBool(req.body?.wait_for_warmup);
     const waitTimeoutMs = toPrimeWaitTimeoutMs(
       req.body?.waitTimeoutMs ?? req.body?.wait_timeout_ms,
       DEFAULT_PRIME_WAIT_TIMEOUT_MS,
     );
-    const { resolvedUserId, resolvedDemographics } = await resolvePrimeContext({
-      clerkId,
-      userId,
-      demographics,
-    });
+    // Derive identity from the verified token only; ignore any client-supplied
+    // userId/demographics (mass-assignment guard).
+    const resolvedUserId = req.dbUser.userId;
+    const resolvedDemographics = await getUserDemographics(resolvedUserId);
 
     const primeResult = waitForWarmup
       ? await primeMlContextAndWait({
@@ -95,15 +95,11 @@ primeRoutes.post("/", async (req, res) => {
   }
 });
 
-primeRoutes.get("/status/:clerkId", async (req, res) => {
+primeRoutes.get("/status/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {
-    const { clerkId } = req.params;
     const mealType = String(req.query?.mealType || "all").trim().toLowerCase() || "all";
-    const { resolvedUserId, resolvedDemographics } = await resolvePrimeContext({
-      clerkId,
-      userId: null,
-      demographics: null,
-    });
+    const resolvedUserId = req.dbUser.userId;
+    const resolvedDemographics = await getUserDemographics(resolvedUserId);
 
     const primeStatus = await getMlPrimeWarmupStatus({
       userId: resolvedUserId,
