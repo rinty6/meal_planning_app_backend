@@ -56,6 +56,14 @@ export const fatSecretLimiter = buildLimiter({
   message: "Too many nutrition lookup requests. Please wait a moment and try again.",
 });
 
+// Image recognition proxy. These requests can be larger and trigger model
+// inference, so keep a dedicated bucket below the global API ceiling.
+export const foodRecognitionLimiter = buildLimiter({
+  windowMs: 60_000,
+  max: toPositiveInt(process.env.RATE_LIMIT_FOOD_RECOGNITION_MAX, 30),
+  message: "Too many food recognition requests. Please wait a moment and try again.",
+});
+
 // ML warmup.
 export const primeLimiter = buildLimiter({
   windowMs: 60_000,

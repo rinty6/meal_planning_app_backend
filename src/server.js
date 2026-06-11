@@ -9,6 +9,7 @@ import {
   feedbackLimiter,
   recommendationLimiter,
   fatSecretLimiter,
+  foodRecognitionLimiter,
   primeLimiter,
   bootstrapLimiter,
 } from './middleware/rateLimit.js';
@@ -31,6 +32,7 @@ import deviceRoutes from './routes/devices.js';
 import notificationRoutes from './routes/notifications.js';
 import internalRoutes from './routes/internal.js';
 import primeRoutes from './routes/prime.js';
+import foodRecognitionRoutes from './routes/foodRecognition.js';
 
 import userRoutes from './routes/users.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -186,6 +188,7 @@ app.use('/api', globalLimiter);
 app.use('/api/users/bootstrap', bootstrapLimiter);
 app.use('/api/recommendation', recommendationLimiter);
 app.use('/api/fatsecret', fatSecretLimiter);
+app.use('/api/food-recognition', foodRecognitionLimiter);
 app.use('/api/meal-plan', recommendationLimiter);
 app.use('/api/prime', primeLimiter);
 app.use('/api/feedback', feedbackLimiter);
@@ -196,6 +199,7 @@ app.use('/api/feedback', feedbackLimiter);
 // so rejected floods do not need body parsing.
 app.use('/api/feedback', express.json({ limit: '10mb' }));
 app.use('/api/meals', express.json({ limit: '10mb' }));
+app.use('/api/food-recognition', express.json({ limit: '10mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
@@ -207,6 +211,7 @@ app.use('/api/shopping', shoppingRoutes);
 app.use('/api/calorie', calorieRoutes);
 app.use('/api/recommendation', recommendationRoutes);
 app.use('/api/fatsecret', fatSecretRoutes);
+app.use('/api/food-recognition', foodRecognitionRoutes);
 app.use('/api/meal-plan', mealPlanRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
