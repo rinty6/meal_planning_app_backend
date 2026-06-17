@@ -2,6 +2,56 @@
 
 This folder contains the Node.js / Express backend for the meal planning app. It is the integration layer between the mobile client, PostgreSQL, push notifications, feedback handling, and the Python recommendation service.
 
+## Backend Request Flow
+
+The phone app does not talk directly to the database or third-party services. A user action on a phone screen becomes an API request, the Node.js / Express backend receives it, shared middleware protects and normalizes the request, then the matching route handler calls the right database table, service, or external API and returns a stable JSON response to the app.
+
+```mermaid
+flowchart LR
+  user["User"]
+  phone["Phone screen<br/>React Native / Expo"]
+  client["API client<br/>fetch(API_URL + /api/...)"]
+  express["Node.js / Express<br/>backend/src/server.js"]
+  middleware["Shared request layer<br/>helmet, rate limits, body limits,<br/>auth and owner checks"]
+  router{"Route family<br/>matched by path"}
+
+  user -->|"taps, searches, saves, logs food"| phone
+  phone -->|"builds request"| client
+  client -->|"HTTP request"| express
+  express --> middleware
+  middleware --> router
+
+  router --> users["Account and profile<br/>/api/users<br/>/api/demographics<br/>/api/profile"]
+  router --> meals["Meals and calories<br/>/api/meals<br/>/api/calorie"]
+  router --> planning["Planning and recommendations<br/>/api/recommendation<br/>/api/meal-plan<br/>/api/prime"]
+  router --> shopping["Saved user data<br/>/api/favorites<br/>/api/shopping"]
+  router --> integrations["Integrations<br/>/api/fatsecret<br/>/api/food-recognition<br/>/api/feedback"]
+  router --> notifications["Devices and notifications<br/>/api/devices<br/>/api/notifications"]
+
+  users --> postgres[("Neon PostgreSQL")]
+  meals --> postgres
+  planning --> postgres
+  shopping --> postgres
+  notifications --> postgres
+
+  planning --> ml["Python recommendation service"]
+  integrations --> external["External services<br/>FatSecret, USDA, Open Food Facts,<br/>Clerk, Resend, Expo Push"]
+  integrations --> vision["Food recognition service"]
+
+  postgres --> response["JSON response<br/>data or controlled error"]
+  ml --> response
+  external --> response
+  vision --> response
+  response --> phone
+```
+
+Request contract:
+
+1. The app screen asks the backend for one clear action, such as loading meals, saving a favourite, scanning food, or updating a shopping list.
+2. `server.js` is the front door: it applies platform checks, rate limits, body-size limits, JSON parsing, and then mounts the `/api/...` route families.
+3. Private user-data routes verify the Clerk identity and scope database work to the signed-in user, so one user cannot read or change another user's rows.
+4. Route handlers return predictable JSON. Successful requests return the data the phone needs; failed requests return a controlled error response instead of crashing the app.
+
 ## Responsibilities
 
 The backend is responsible for:
@@ -12,6 +62,7 @@ The backend is responsible for:
 - calling the machine learning service for recommendation generation and cache priming
 - handling notification device registration and push delivery helpers
 - sending feedback email and storing recommendation feedback
+- proxying food-recognition requests so the mobile app does not call the recognition service directly
 - exposing health endpoints for local and hosted deployments
 
 ## Route Surface
@@ -32,7 +83,9 @@ Main route groups:
 - notifications: `/api/notifications`
 - feedback: `/api/feedback`
 - FatSecret integration: `/api/fatsecret`
+- food recognition: `/api/food-recognition`
 - recommendations: `GET /api/recommendation/:clerkId`, `POST /api/recommendation/feedback`
+- meal planning: `/api/meal-plan`
 - recommendation warmup: `POST /api/prime`, `GET /api/prime/status/:clerkId`
 
 Two recommendation-related behaviors are important operationally:
@@ -61,19 +114,28 @@ Core variables:
 - `DB_URL`: PostgreSQL connection string used by Neon / Drizzle
 - `NODE_ENV`: set to `production` in hosted environments
 - `CLERK_SECRET_KEY`: required for Clerk-backed server operations
+- `NOTIFICATIONS_CRON_ENABLED`: optional override; set to `true` to start scheduled notification jobs even outside production/Railway
+- `NOTIFICATIONS_CRON_DISABLED`: optional override; set to `true` to prevent scheduled notification jobs from starting
+- `NOTIFICATION_TIME_ZONE`: optional notification scheduler time zone, defaults to `Australia/Adelaide`
+- `INTERNAL_TRIGGER_SECRET`: optional shared secret for ops-only endpoints such as `/api/internal/run-reminders` and `/api/health/runtime`
 
 Recommendation service variables:
 
-- `ML_SERVICE_URL`: defaults to `http://localhost/api/recommendation`
-- `ML_SERVICE_PRIME_URL`: defaults to `http://localhost/api/prime`
+- `ML_SERVICE_URL`: optional; only set when an external recommendation service is active
+- `ML_SERVICE_PRIME_URL`: optional; only set when an external recommendation prime service is active
 - `RECOMMENDATION_DEBUG_LOGS`: set to `1` to log detailed recommendation timing and response summaries
 
 Feature-specific variables:
 
 - `FATSECRET_CLIENT_ID`: required for FatSecret-backed lookups
 - `FATSECRET_CLIENT_SECRET`: required for FatSecret-backed lookups
+- `FOOD_RECOGNITION_API_URL`: required when food recognition is active; backend-only URL for the FastAPI food recognition service
+- `FOOD_RECOGNITION_API_TOKEN`: required when food recognition is active; server-only shared token sent to the Food Recognition API as `x-food-api-token`
 - `EMAIL_USER`: sender account for feedback mail flows
-- `EMAIL_PASSWORD`: sender password or app password for feedback mail flows
+- `EMAIL_PASSWORD`: Gmail app password for feedback mail flows
+- `FEEDBACK_TO_EMAIL`: optional override for the feedback inbox recipient
+- `RATE_LIMIT_FATSECRET_MAX`: optional `/api/fatsecret` per-minute IP limit, defaults to `60`
+- `RATE_LIMIT_FOOD_RECOGNITION_MAX`: optional `/api/food-recognition` per-minute IP limit, defaults to `30`
 
 ## Local Development
 
@@ -135,12 +197,14 @@ Unmatched `GET` and `HEAD` requests are sampled into warning logs so future prob
 
 ## Cron Behavior
 
-Cron jobs are started only when `NODE_ENV === "production"`.
+Cron jobs are started when the backend is running in production, when Railway runtime variables are present, or when `NOTIFICATIONS_CRON_ENABLED=true`.
 
 That means:
 
-- local development will not automatically start reminder and summary jobs unless you explicitly run in production mode
+- local development will not automatically start reminder and summary jobs unless you explicitly enable them
 - hosted deployments should be treated as single-process schedulers unless you intentionally split cron into a dedicated worker topology
+- `NOTIFICATIONS_CRON_DISABLED=true` wins over all other scheduler start conditions
+- if the host fully sleeps the Node process at the scheduled time, in-process cron cannot fire until the service wakes
 
 ## Railway Deployment Notes
 
@@ -151,7 +215,8 @@ Recommended deployment checklist:
 3. point `ML_SERVICE_URL` and `ML_SERVICE_PRIME_URL` at the deployed ML service
 4. verify `GET /health` and `GET /` return `200`
 5. verify `POST /api/prime` and `GET /api/prime/status/:clerkId` behave correctly against the live ML service
-6. confirm cron behavior is acceptable for the number of running backend instances
+6. confirm notification cron behavior is acceptable for the number of running backend instances
+7. optionally set `NOTIFICATIONS_CRON_ENABLED=true` for an explicit scheduler on switch, or `NOTIFICATIONS_CRON_DISABLED=true` when a separate worker owns scheduled notifications
 
 ## Workspace Relationship
 
