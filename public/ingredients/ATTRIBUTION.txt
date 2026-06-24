@@ -1,0 +1,5 @@
+Ingredient images.
+Primary source: TheMealDB (https://www.themealdb.com) ingredient thumbnails,
+processed (background removed) for app use under a paid supporter key.
+Some images were manually replaced/uploaded by the app owner.
+Credit TheMealDB as the data source in the app (About/credits screen).

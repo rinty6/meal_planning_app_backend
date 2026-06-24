@@ -163,6 +163,20 @@ app.get(['/privacy-policy', '/privacy-policy/', '/privacy-policy.html'], (req, r
   res.sendFile(privacyPolicyFilePath);
 });
 
+// Serve curated transparent ingredient images as static assets. These PNGs are
+// committed to the repo (backend/public/ingredients) so Railway deploys them with
+// the service. Filenames are stable, so cache aggressively. CORP is set to
+// cross-origin so the mobile app can load them. Used by the recipe detail page
+// via ingredientImages.json `baseUrl`.
+const ingredientImagesDir = path.resolve(currentDirPath, '../public/ingredients');
+app.use('/ingredients', express.static(ingredientImagesDir, {
+  maxAge: '365d',
+  immutable: true,
+  setHeaders: (res) => {
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  },
+}));
+
 // Mirror the health response on a generic path used by some hosting probes.
 app.get('/health', (req, res) => {
   warmFatSecretCacheInBackground('health');
