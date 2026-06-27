@@ -15,6 +15,9 @@ export const ENV = {
   FEEDBACK_FROM_EMAIL: process.env.FEEDBACK_FROM_EMAIL || '',
   FOOD_RECOGNITION_API_URL: process.env.FOOD_RECOGNITION_API_URL || '',
   FOOD_RECOGNITION_API_TOKEN: process.env.FOOD_RECOGNITION_API_TOKEN || '',
+  // TheMealDB premier key for recipe browse-by-cuisine. Falls back to the public
+  // test key "1" for local dev (limited catalog).
+  MEALDB_API_KEY: process.env.MEALDB_API_KEY || '1',
   // Shared secret that protects the manual notification trigger
   // (POST /api/internal/run-reminders). When empty, the endpoint is disabled.
   INTERNAL_TRIGGER_SECRET: process.env.INTERNAL_TRIGGER_SECRET || '',
