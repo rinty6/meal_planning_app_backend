@@ -10,7 +10,7 @@ export const ENV = {
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || '',
   EMAIL_USER: process.env.EMAIL_USER || '',
   EMAIL_PASSWORD: process.env.EMAIL_PASSWORD || '',
-  FEEDBACK_TO_EMAIL: process.env.FEEDBACK_TO_EMAIL || 'duongphuthinh2001@gmail.com',
+  FEEDBACK_TO_EMAIL: process.env.FEEDBACK_TO_EMAIL || '',
   RESEND_API_KEY: process.env.RESEND_API_KEY || '',
   FEEDBACK_FROM_EMAIL: process.env.FEEDBACK_FROM_EMAIL || '',
   FOOD_RECOGNITION_API_URL: process.env.FOOD_RECOGNITION_API_URL || '',
