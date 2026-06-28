@@ -1,7 +1,47 @@
 import express from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ENV } from "../config/env.js";
 import { createTtlCache } from "../utils/ttlCache.js";
+
+// Precomputed list of the ~29 cuisines that actually have recipes (with counts).
+// TheMealDB's a=list returns ~192 geographic countries but most are empty, so we
+// serve this committed file instead of the raw list. Regenerate with:
+//   node scripts/build-themealdb-areas.js
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const loadAreasWithRecipes = () => {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, "..", "data", "themealdb_areas.json"), "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.areas) ? parsed.areas : [];
+  } catch (e) {
+    console.warn("[themealdb] could not load themealdb_areas.json:", e.message);
+    return [];
+  }
+};
+const AREAS_WITH_RECIPES = loadAreasWithRecipes();
+
+// Precomputed per-recipe nutrition (offline, from USDA + curated overrides).
+// Keyed by recipe id; totals are for the WHOLE recipe. Regenerate with:
+//   python tools/themealdb_nutrition/compute_nutrition.py
+const loadNutrition = () => {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, "..", "data", "themealdb_nutrition.json"), "utf8");
+    return JSON.parse(raw).recipes || {};
+  } catch (e) {
+    console.warn("[themealdb] could not load themealdb_nutrition.json:", e.message);
+    return {};
+  }
+};
+const NUTRITION = loadNutrition();
+
+// TheMealDB hosts its own ingredient thumbnails. Because TheMealDB recipes carry
+// TheMealDB ingredient names, these match almost perfectly (far better coverage
+// than our curated set, which uses different names e.g. "arugula" vs "Rocket").
+const ingredientImageUrl = (name) =>
+  `https://www.themealdb.com/images/ingredients/${encodeURIComponent(name)}-small.png`;
 
 // TheMealDB browse-by-cuisine proxy (Phase 1 of the recipe integration).
 // The premier key stays server-side; clients hit /api/themealdb/*. TheMealDB
@@ -52,7 +92,7 @@ const extractIngredients = (meal) => {
   for (let i = 1; i <= 20; i += 1) {
     const name = String(meal[`strIngredient${i}`] || "").trim();
     const measure = String(meal[`strMeasure${i}`] || "").trim();
-    if (name) out.push({ name, measure });
+    if (name) out.push({ name, measure, image: ingredientImageUrl(name) });
   }
   return out;
 };
@@ -89,9 +129,21 @@ const toUnifiedRecipe = (meal) => ({
   source_url: meal.strSource || "",
   ingredients: extractIngredients(meal),
   instructions: splitInstructions(meal.strInstructions),
-  // Phase 2 (USDA) fills these in; flagged so the UI shows an "estimate pending" state.
-  nutrition: { calories: null, protein: null, carbs: null, fats: null, estimated: true, status: "pending" },
+  nutrition: nutritionFor(meal.idMeal),
 });
+
+// Attach precomputed nutrition if we have it, else the estimate-pending placeholder.
+const nutritionFor = (idMeal) => {
+  const c = NUTRITION[String(idMeal)];
+  if (!c) {
+    return { calories: null, protein: null, carbs: null, fats: null, estimated: true, status: "pending" };
+  }
+  return {
+    calories: c.calories, protein: c.protein, carbs: c.carbs, fats: c.fats, sugar: c.sugar,
+    estimated: true, status: "computed", basis: c.basis || "whole_recipe",
+    coverage: c.coverage, lowConfidence: !!c.lowConfidence,
+  };
+};
 
 const toDishCard = (meal) => ({
   source: "themealdb",
@@ -100,28 +152,14 @@ const toDishCard = (meal) => ({
   image: meal.strMealThumb || "",
 });
 
-// GET /api/themealdb/areas -> list of cuisines/countries
+// GET /api/themealdb/areas -> cuisines that actually have recipes, with counts.
+// Served from the precomputed file (the raw a=list is ~192 mostly-empty areas).
 themealdbRoutes.get("/areas", async (req, res) => {
-  const cacheKey = "areas";
-  const cached = LIST_CACHE.get(cacheKey);
-  if (cached) {
-    res.set("Cache-Control", LIST_CACHE_HEADER);
-    return res.json(cached);
-  }
-  try {
-    const data = await fetchMealDb("list.php?a=list");
-    const areas = [...new Set(
-      ensureArray(data.meals)
-        .map((m) => String(m.strArea || "").trim())
-        .filter((a) => a && a !== "Unknown")
-    )].sort();
-    const payload = { areas };
-    LIST_CACHE.set(cacheKey, payload);
-    res.set("Cache-Control", LIST_CACHE_HEADER);
-    return res.json(payload);
-  } catch (error) {
-    return res.status(502).json({ error: "Failed to load cuisines", detail: String(error.message || error) });
-  }
+  // Short cache: this list changes when we regenerate themealdb_areas.json, so a
+  // 24h client cache would strand users on a stale list. It's served from a local
+  // file, so re-fetching cheaply is fine.
+  res.set("Cache-Control", "public, max-age=300");
+  return res.json({ areas: AREAS_WITH_RECIPES });
 });
 
 // GET /api/themealdb/by-area/:area -> dishes for a cuisine

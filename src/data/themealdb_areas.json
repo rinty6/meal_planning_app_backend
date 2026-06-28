@@ -1,0 +1,123 @@
+{
+  "generatedAt": "2026-06-27T12:47:43.433Z",
+  "source": "themealdb",
+  "totalAreasListed": 192,
+  "areas": [
+    {
+      "area": "Algerian",
+      "count": 12
+    },
+    {
+      "area": "Australian",
+      "count": 13
+    },
+    {
+      "area": "British",
+      "count": 60
+    },
+    {
+      "area": "Canadian",
+      "count": 22
+    },
+    {
+      "area": "Chinese",
+      "count": 27
+    },
+    {
+      "area": "Croatian",
+      "count": 8
+    },
+    {
+      "area": "Egyptian",
+      "count": 8
+    },
+    {
+      "area": "Filipino",
+      "count": 8
+    },
+    {
+      "area": "Greek",
+      "count": 8
+    },
+    {
+      "area": "Irish",
+      "count": 8
+    },
+    {
+      "area": "Italian",
+      "count": 21
+    },
+    {
+      "area": "Jamaican",
+      "count": 27
+    },
+    {
+      "area": "Japanese",
+      "count": 9
+    },
+    {
+      "area": "Kenyan",
+      "count": 5
+    },
+    {
+      "area": "Malaysian",
+      "count": 8
+    },
+    {
+      "area": "Mexican",
+      "count": 6
+    },
+    {
+      "area": "Moroccan",
+      "count": 6
+    },
+    {
+      "area": "Polish",
+      "count": 27
+    },
+    {
+      "area": "Portuguese",
+      "count": 8
+    },
+    {
+      "area": "Russian",
+      "count": 7
+    },
+    {
+      "area": "Saudi Arabian",
+      "count": 12
+    },
+    {
+      "area": "Spanish",
+      "count": 48
+    },
+    {
+      "area": "Syrian",
+      "count": 6
+    },
+    {
+      "area": "Thai",
+      "count": 27
+    },
+    {
+      "area": "Tunisian",
+      "count": 8
+    },
+    {
+      "area": "Turkish",
+      "count": 30
+    },
+    {
+      "area": "Ukrainian",
+      "count": 7
+    },
+    {
+      "area": "Uruguayan",
+      "count": 9
+    },
+    {
+      "area": "Vietnamese",
+      "count": 27
+    }
+  ]
+}
