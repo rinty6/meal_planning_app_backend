@@ -16,7 +16,7 @@ import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../mid
 
 const mealPlanRoutes = express.Router();
 
-export const ALLOWED_MEAL_PLAN_ALLERGENS = [
+const ALLOWED_MEAL_PLAN_ALLERGENS = [
   "Egg",
   "Fish",
   "Gluten",
@@ -29,7 +29,7 @@ export const ALLOWED_MEAL_PLAN_ALLERGENS = [
   "Soy",
 ];
 
-export const ALLOWED_MEAL_PLAN_DIETS = ["Vegan", "Vegetarian"];
+const ALLOWED_MEAL_PLAN_DIETS = ["Vegan", "Vegetarian"];
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner"];
 const ALLOWED_EVENT_TYPES = new Set([
