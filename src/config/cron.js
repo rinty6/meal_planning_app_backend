@@ -78,18 +78,6 @@ const getLocalParts = (timeZone) => {
     };
 };
 
-const getLatestNotificationGoalForUser = async (userId) => {
-    const goals = await db
-        .select()
-        .from(calorieGoalsTable)
-        .where(eq(calorieGoalsTable.userId, userId))
-        .orderBy(desc(calorieGoalsTable.createdAt))
-        .limit(1);
-
-    const goal = goals[0] || null;
-    return goal?.notificationsEnabled ? goal : null;
-};
-
 const getLatestActiveNotificationGoalForUser = async (userId, dateStr) => {
     const goals = await db
         .select()
@@ -154,9 +142,11 @@ const sendMealReminderToUser = async ({ userId, reminderType, title, body }) => 
 // Build + send the calorie summary for one user on their local date.
 // Returns { eligible } so callers can distinguish "no goal" from "sent".
 const sendDailySummaryToUser = async ({ userId, localDate }) => {
-    const goal =
-        (await getLatestActiveNotificationGoalForUser(userId, localDate)) ||
-        (await getLatestNotificationGoalForUser(userId));
+    // Only summarise against a goal whose date range covers today. A completed or
+    // expired goal (or none at all) yields no summary — we deliberately do NOT fall
+    // back to the latest goal, otherwise the nightly praise keeps firing after a
+    // goal has ended even though the user never set a new one.
+    const goal = await getLatestActiveNotificationGoalForUser(userId, localDate);
     if (!goal) return { eligible: false, sent: 0 };
 
     const target = toNumber(goal.dailyCalories) || 2000;

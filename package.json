@@ -17,6 +17,7 @@
     "@clerk/backend": "^1.27.0",
     "@neondatabase/serverless": "^1.0.2",
     "base-64": "^1.0.0",
+    "cloudinary": "^2.10.0",
     "cors": "^2.8.5",
     "cron": "^4.3.5",
     "dotenv": "^17.2.3",

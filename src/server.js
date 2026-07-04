@@ -209,13 +209,14 @@ app.use('/api/meal-plan', recommendationLimiter);
 app.use('/api/prime', primeLimiter);
 app.use('/api/feedback', feedbackLimiter);
 
-// Body limits: a tight 1 MB default protects the ~40 JSON routes; the two routes
-// that legitimately accept base64 images (feedback photo, manual-food photo) get
-// a 10 MB cap. Previously every route accepted 50 MB. Limiters are mounted first
-// so rejected floods do not need body parsing.
+// Body limits: a tight 1 MB default protects the ~40 JSON routes; routes that
+// legitimately accept base64 images (feedback photo, manual-food photo, recipe
+// photo upload) get a 10 MB cap. Previously every route accepted 50 MB.
+// Limiters are mounted first so rejected floods do not need body parsing.
 app.use('/api/feedback', express.json({ limit: '10mb' }));
 app.use('/api/meals', express.json({ limit: '10mb' }));
 app.use('/api/food-recognition', express.json({ limit: '10mb' }));
+app.use('/api/favorites', express.json({ limit: '10mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 

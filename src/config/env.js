@@ -15,6 +15,10 @@ export const ENV = {
   FEEDBACK_FROM_EMAIL: process.env.FEEDBACK_FROM_EMAIL || '',
   FOOD_RECOGNITION_API_URL: process.env.FOOD_RECOGNITION_API_URL || '',
   FOOD_RECOGNITION_API_TOKEN: process.env.FOOD_RECOGNITION_API_TOKEN || '',
+  // Cloudinary hosts user-uploaded recipe photos (recipesTable.image only ever stores a URL).
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || '',
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || '',
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || '',
   // TheMealDB premier key for recipe browse-by-cuisine. Falls back to the public
   // test key "1" for local dev (limited catalog).
   MEALDB_API_KEY: process.env.MEALDB_API_KEY || '1',

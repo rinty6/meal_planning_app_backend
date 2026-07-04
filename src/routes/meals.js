@@ -36,7 +36,7 @@ const getActiveGoalForDate = async (userId, dateStr) => {
     .orderBy(desc(calorieGoalsTable.createdAt))
     .limit(1);
 
-  if (activeGoals.length > 0) return activeGoals[0];
+  if (activeGoals.length > 0) return { ...activeGoals[0], isActive: true };
 
   const latestGoals = await db
     .select()
@@ -45,16 +45,21 @@ const getActiveGoalForDate = async (userId, dateStr) => {
     .orderBy(desc(calorieGoalsTable.createdAt))
     .limit(1);
   const latestGoal = latestGoals[0] || null;
+  // Keep the latest goal's target for the response's dailyTarget display, but mark
+  // it INACTIVE. A completed/expired goal must never fire a "goal achieved" push,
+  // only a goal whose date range covers today (isActive) may.
   if (latestGoal?.notificationsEnabled) {
     return {
       ...latestGoal,
       notificationSource: "latest_notification_goal",
+      isActive: false,
     };
   }
 
   return {
     dailyCalories: 2000,
     notificationsEnabled: false,
+    isActive: false,
   };
 };
 
@@ -113,7 +118,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
     const exceededLimit = newTotalCalories > target;
 
     // Send push + save inbox history once when crossing the target threshold for the day.
-    if (user.notificationsMasterEnabled !== false && goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && goal.isActive && goal.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
@@ -181,7 +186,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
     const reachedTarget = newTotalCalories >= target && previousTotalCalories < target;
     const exceededLimit = newTotalCalories > target;
 
-    if (user.notificationsMasterEnabled !== false && goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && goal.isActive && goal.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",

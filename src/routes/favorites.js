@@ -3,12 +3,64 @@
 // Delete and add favorite dishes or recipes
 
 import express from "express";
+import { v2 as cloudinary } from "cloudinary";
 import { db } from "../config/db.js";
 import { recipesTable, favouritesTable } from "../db/schema.js";
 import { eq, and } from "drizzle-orm";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
+import { ENV } from "../config/env.js";
 
 const favoritesRoutes = express.Router();
+
+// Recipe photo upload (Cloudinary). recipesTable.image only ever stores a URL —
+// the actual bytes are hosted here, matching every other image in this app
+// (FatSecret, TheMealDB, ingredient icons all point off-box too).
+const MAX_IMAGE_BASE64_CHARS = 8_000_000; // ~6MB decoded, same cap as food-recognition proxy
+const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+
+const requireCloudinaryConfig = () => {
+  const { CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = ENV;
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+    const error = new Error("Image upload is not configured.");
+    error.status = 503;
+    throw error;
+  }
+  cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD_NAME,
+    api_key: CLOUDINARY_API_KEY,
+    api_secret: CLOUDINARY_API_SECRET,
+  });
+};
+
+const validateImageDataUri = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    const error = new Error("imageBase64 is required.");
+    error.status = 400;
+    throw error;
+  }
+  if (raw.length > MAX_IMAGE_BASE64_CHARS) {
+    const error = new Error("Image is too large.");
+    error.status = 413;
+    throw error;
+  }
+
+  const match = raw.match(/^data:([^;,]+);base64,([\s\S]+)$/);
+  if (!match) {
+    const error = new Error("imageBase64 must be a data URI (data:<mime>;base64,...).");
+    error.status = 400;
+    throw error;
+  }
+
+  const mimeType = match[1].toLowerCase();
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
+    const error = new Error("Unsupported image type. Use JPEG, PNG, or WebP.");
+    error.status = 415;
+    throw error;
+  }
+
+  return raw;
+};
 
 const normalizeExternalId = (item = {}) => {
   const rawId = item.externalId ?? item.id ?? item.foodId;
@@ -74,6 +126,24 @@ favoritesRoutes.post("/save-custom", requireClerkAuth, ensureClerkIdMatch("body"
   } catch (error) {
     console.error("Save Custom Recipe Error:", error);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// 1B. UPLOAD RECIPE PHOTO (Used by the Recipe Detail Page's create/edit hero image)
+favoritesRoutes.post("/upload-image", requireClerkAuth, attachUserFromAuth, async (req, res) => {
+  try {
+    requireCloudinaryConfig();
+    const dataUri = validateImageDataUri(req.body?.imageBase64);
+
+    const uploadResult = await cloudinary.uploader.upload(dataUri, {
+      folder: "goodhealthmate/recipes",
+      resource_type: "image",
+    });
+
+    res.status(200).json({ url: uploadResult.secure_url });
+  } catch (error) {
+    console.error("Recipe image upload error:", error);
+    res.status(error.status || 500).json({ error: error.message || "Image upload failed." });
   }
 });
 
@@ -282,15 +352,22 @@ favoritesRoutes.get("/custom/:id", requireClerkAuth, attachUserFromAuth, async (
 favoritesRoutes.put("/update-recipe/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, calories, ingredients, instructions } = req.body; // We mainly update these
+    const { title, calories, ingredients, instructions, image } = req.body;
+
+    const updateValues = {
+      title,
+      calories: toNumber(calories),
+      ingredients,
+      instructions,
+    };
+    // Only touch the image column when the client actually sent one, so an
+    // edit that doesn't include a photo never wipes out an existing image.
+    if (image !== undefined) {
+      updateValues.image = image;
+    }
 
     const updated = await db.update(recipesTable)
-      .set({
-        title,
-        calories: toNumber(calories),
-        ingredients,
-        instructions,
-      })
+      .set(updateValues)
       .where(and(eq(recipesTable.id, id), eq(recipesTable.userId, req.dbUser.userId)))
       .returning();
 
