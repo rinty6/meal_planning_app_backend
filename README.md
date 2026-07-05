@@ -131,9 +131,11 @@ Feature-specific variables:
 - `FATSECRET_CLIENT_SECRET`: required for FatSecret-backed lookups
 - `FOOD_RECOGNITION_API_URL`: required when food recognition is active; backend-only URL for the FastAPI food recognition service
 - `FOOD_RECOGNITION_API_TOKEN`: required when food recognition is active; server-only shared token sent to the Food Recognition API as `x-food-api-token`
-- `EMAIL_USER`: sender account for feedback mail flows
-- `EMAIL_PASSWORD`: Gmail app password for feedback mail flows
-- `FEEDBACK_TO_EMAIL`: optional override for the feedback inbox recipient
+- `RESEND_API_KEY`: required for the recommended production feedback mail flow; create this in Resend and store it only in Railway or local `.env`
+- `FEEDBACK_TO_EMAIL`: required recipient for app feedback, for example `feedback@dreamingstudio.net`
+- `FEEDBACK_FROM_EMAIL`: required sender identity for Resend, for example `GoodHealthMate Feedback <feedback@mail.dreamingstudio.net>`
+- `EMAIL_USER`: optional Gmail SMTP fallback sender account; not needed when `RESEND_API_KEY` is set
+- `EMAIL_PASSWORD`: optional Gmail SMTP fallback app password; not needed when `RESEND_API_KEY` is set
 - `RATE_LIMIT_FATSECRET_MAX`: optional `/api/fatsecret` per-minute IP limit, defaults to `60`
 - `RATE_LIMIT_FOOD_RECOGNITION_MAX`: optional `/api/food-recognition` per-minute IP limit, defaults to `30`
 
