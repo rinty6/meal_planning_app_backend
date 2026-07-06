@@ -352,7 +352,7 @@ favoritesRoutes.get("/custom/:id", requireClerkAuth, attachUserFromAuth, async (
 favoritesRoutes.put("/update-recipe/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, calories, ingredients, instructions, image } = req.body;
+    const { title, calories, protein, carbs, fats, servings, ingredients, instructions, image } = req.body;
 
     const updateValues = {
       title,
@@ -360,6 +360,12 @@ favoritesRoutes.put("/update-recipe/:id", requireClerkAuth, attachUserFromAuth, 
       ingredients,
       instructions,
     };
+    // Persist edited macros / serving count when the client sends them, so the
+    // redesigned editable nutrition card round-trips on update (not just create).
+    if (protein !== undefined) updateValues.protein = toNumber(protein);
+    if (carbs !== undefined) updateValues.carbs = toNumber(carbs);
+    if (fats !== undefined) updateValues.fats = toNumber(fats);
+    if (servings !== undefined) updateValues.servings = Number(servings) || 1;
     // Only touch the image column when the client actually sent one, so an
     // edit that doesn't include a photo never wipes out an existing image.
     if (image !== undefined) {
