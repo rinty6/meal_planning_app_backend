@@ -739,6 +739,64 @@ export const enrichRecommendationImages = async (recommendationsByMeal) => {
   return recommendationsByMeal;
 };
 
+// FatSecret only returns number_of_servings from recipe.get (never recipes.search),
+// so recommendation recipe items ship without a serving count. This walks the payload
+// and attaches the real count via the already-cached recipe detail lookup — bounded,
+// best-effort, and time-capped so recommendations never stall on FatSecret.
+const RECIPE_SERVINGS_LOOKUP_TIMEOUT_MS = 1500;
+const RECIPE_SERVINGS_ENRICH_MAX_PARALLEL = 12;
+
+const getEnrichableRecipeId = (entry) => {
+  const explicit = String(entry?.recipe_id || "").trim();
+  if (explicit) return explicit;
+  const id = String(entry?.id || "").trim();
+  return id.toLowerCase().startsWith("recipe-") ? id.slice("recipe-".length) : "";
+};
+
+const lookupServingsForRecipeId = async (recipeId) => {
+  try {
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), RECIPE_SERVINGS_LOOKUP_TIMEOUT_MS));
+    // getRecipeDetails caches per recipeId, so repeats are ~0ms; a timed-out first
+    // call still completes in the background and populates that cache for next time.
+    const detail = await Promise.race([getRecipeDetails(recipeId), timeout]);
+    const servings = Number.parseInt(detail?.servings, 10);
+    return Number.isFinite(servings) && servings > 0 ? servings : null;
+  } catch {
+    return null;
+  }
+};
+
+export const enrichRecommendationServings = async (recommendationsByMeal) => {
+  if (!recommendationsByMeal || typeof recommendationsByMeal !== "object") return recommendationsByMeal;
+
+  const targets = [];
+  for (const mealType of Object.keys(recommendationsByMeal)) {
+    const list = ensureArray(recommendationsByMeal[mealType]);
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      if (!(toNumber(entry.servings, 0) > 0) && getEnrichableRecipeId(entry)) targets.push(entry);
+      const subItems = ensureArray(entry.items);
+      for (const sub of subItems) {
+        if (sub && typeof sub === "object" && !(toNumber(sub.servings, 0) > 0) && getEnrichableRecipeId(sub)) {
+          targets.push(sub);
+        }
+      }
+    }
+  }
+
+  if (targets.length === 0) return recommendationsByMeal;
+
+  const slice = targets.slice(0, RECIPE_SERVINGS_ENRICH_MAX_PARALLEL);
+  await Promise.all(
+    slice.map(async (entry) => {
+      const servings = await lookupServingsForRecipeId(getEnrichableRecipeId(entry));
+      if (servings) entry.servings = servings;
+    })
+  );
+
+  return recommendationsByMeal;
+};
+
 export const getDetailedMacros = async (foodIds = []) => {
   const uniqueIds = uniqueStrings(ensureArray(foodIds)).slice(0, 25);
   if (uniqueIds.length === 0) return {};

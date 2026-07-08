@@ -17,7 +17,7 @@ import {
   toNumber,
 } from "./recommendation/helpers.js";
 import { buildRecommendationResponsePayload } from "./recommendation/responseBuilder.js";
-import { enrichRecommendationImages } from "../services/mealAPI.js";
+import { enrichRecommendationImages, enrichRecommendationServings } from "../services/mealAPI.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
@@ -143,12 +143,17 @@ recommendationRoutes.get("/:clerkId", requireClerkAuth, ensureClerkIdMatch("para
       }
     }
 
-    // Backfill missing image URLs via FatSecret search (cached). off.db has no image column, so combos arrive imageless.
-    try {
-      await enrichRecommendationImages(routePayload?.recommendationsByMeal);
-    } catch (enrichError) {
-      console.warn("Recommendation image enrichment failed (non-fatal):", enrichError?.message || enrichError);
-    }
+    // Backfill missing image URLs via FatSecret search (cached), and attach real
+    // number_of_servings to recipe items via cached recipe.get lookups. Both are
+    // best-effort and run in parallel so neither adds latency on top of the other.
+    await Promise.all([
+      enrichRecommendationImages(routePayload?.recommendationsByMeal).catch((enrichError) => {
+        console.warn("Recommendation image enrichment failed (non-fatal):", enrichError?.message || enrichError);
+      }),
+      enrichRecommendationServings(routePayload?.recommendationsByMeal).catch((enrichError) => {
+        console.warn("Recommendation servings enrichment failed (non-fatal):", enrichError?.message || enrichError);
+      }),
+    ]);
 
     // Cache the final enriched payload so the next hit within the TTL skips the
     // ML round trip and the FatSecret enrichment entirely. Exploration requests

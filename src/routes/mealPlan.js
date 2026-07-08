@@ -9,7 +9,7 @@ import {
   mealPlanPreferencesTable,
   usersTable,
 } from "../db/schema.js";
-import { getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
+import { enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -892,6 +892,16 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           });
         })
       );
+
+      // Attach real FatSecret number_of_servings to recipe items (recipes.search never
+      // returns it). Cached recipe.get lookups, bounded parallel, best-effort with a
+      // per-lookup timeout — runs BEFORE the payload is cached so the 5-min cache and
+      // in-flight sharers all serve enriched data.
+      try {
+        await enrichRecommendationServings(recommendationsByMeal);
+      } catch (enrichError) {
+        console.warn("Meal plan servings enrichment failed (non-fatal):", enrichError?.message || enrichError);
+      }
 
       const payload = {
         source: "fatsecret_v3",
