@@ -160,8 +160,11 @@ export const mealLogsTable = pgTable('meal_logs', {
   source: text('source'),
   servingId: text('serving_id'),
   servingDescription: text('serving_description'),
+  // How many servings this row represents (supports 0.5 steps). calories/protein/
+  // carbs/fats stay TOTALS for these servings so daily calorie sums never change;
+  // per-serving is derived as total / servings when the summary +/- rescales.
+  servings: real('servings').default(1),
   nutrients: jsonb('nutrients').default({}),
-  
   createdAt: timestamp('created_at').defaultNow(),
 });
 

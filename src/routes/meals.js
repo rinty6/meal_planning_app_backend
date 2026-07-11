@@ -79,6 +79,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       source,
       servingId,
       servingDescription,
+      servings,
       nutrients,
     } = req.body;
     const dateStr = normalizeDateString(date);
@@ -100,6 +101,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       source: source ? String(source) : null,
       servingId: servingId ? String(servingId) : null,
       servingDescription: servingDescription ? String(servingDescription) : null,
+      servings: toNumber(servings) > 0 ? toNumber(servings) : 1,
       nutrients: nutrients && typeof nutrients === "object" ? nutrients : {},
     }).returning();
     const meal = insertedMeals[0] || null;
@@ -167,6 +169,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
       source: item?.source ? String(item.source) : null,
       servingId: item?.servingId ? String(item.servingId) : null,
       servingDescription: item?.servingDescription ? String(item.servingDescription) : null,
+      servings: toNumber(item?.servings) > 0 ? toNumber(item?.servings) : 1,
       nutrients: item?.nutrients && typeof item.nutrients === "object" ? item.nutrients : {},
     }));
 
@@ -247,6 +250,44 @@ mealRoutes.delete("/delete/:id", requireClerkAuth, attachUserFromAuth, async (re
   } catch (error) {
     console.error("Error deleting item:", error);
     res.status(500).json({ error: "Failed to delete" });
+  }
+});
+
+// Update a logged meal's servings and its (already-scaled) macros — used by the
+// meal summary +/- controls. The client sends the new totals it computed from
+// per-serving x servings, so daily calorie sums stay consistent with what's shown.
+mealRoutes.put("/update/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
+  try {
+    const id = parsePositiveIntegerId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid meal log id" });
+
+    const { servings, calories, protein, carbs, fats, servingDescription } = req.body;
+    const safeServings = toNumber(servings) > 0 ? toNumber(servings) : 1;
+
+    const updateValues = {
+      servings: safeServings,
+      calories: toNumber(calories),
+      protein: toNumber(protein),
+      carbs: toNumber(carbs),
+      fats: toNumber(fats),
+    };
+    if (servingDescription !== undefined) {
+      updateValues.servingDescription = servingDescription ? String(servingDescription) : null;
+    }
+
+    const updated = await db
+      .update(mealLogsTable)
+      .set(updateValues)
+      .where(and(eq(mealLogsTable.id, id), eq(mealLogsTable.userId, req.dbUser.userId)))
+      .returning();
+
+    if (updated.length === 0) {
+      return res.status(404).json({ error: "Meal not found" });
+    }
+    res.status(200).json({ success: true, meal: updated[0] });
+  } catch (error) {
+    console.error("Error updating meal:", error);
+    res.status(500).json({ error: "Failed to update meal" });
   }
 });
 
