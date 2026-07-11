@@ -129,19 +129,70 @@ const toUnifiedRecipe = (meal) => ({
   source_url: meal.strSource || "",
   ingredients: extractIngredients(meal),
   instructions: splitInstructions(meal.strInstructions),
-  nutrition: nutritionFor(meal.idMeal),
+  nutrition: nutritionFor(meal.idMeal, meal.strCategory),
 });
 
+// Estimated grams for ONE serving, by TheMealDB category. TheMealDB has no
+// servings count at all, so this is a heuristic: totalGrams (summed from every
+// ingredient's parsed measure, see compute_nutrition.py) divided by a typical
+// per-serving weight for that kind of dish. Category is only available from the
+// live per-recipe API call (not the offline dataset), so this estimate is
+// computed here at request time rather than baked into themealdb_nutrition.json.
+const CATEGORY_SERVING_GRAMS = {
+  dessert: 110,
+  starter: 130,
+  side: 130,
+  breakfast: 250,
+  vegetarian: 300,
+  vegan: 300,
+  seafood: 300,
+  pasta: 350,
+  miscellaneous: 350,
+  chicken: 350,
+  beef: 400,
+  lamb: 400,
+  pork: 400,
+  goat: 400,
+};
+const DEFAULT_SERVING_GRAMS = 350; // unrecognised category -> assume a hearty main
+const MIN_SERVINGS = 1;
+const MAX_SERVINGS = 12;
+const PLAUSIBLE_KCAL_PER_SERVING = { min: 150, max: 900 };
+const FALLBACK_KCAL_PER_SERVING = 550;
+
+// Estimate a whole recipe's servings from its total mass + category, with a
+// calorie-per-serving sanity check so an odd mass estimate (bad source measures,
+// low ingredient coverage) can't produce an absurd serving count.
+const estimateServings = (totalGrams, totalCalories, category) => {
+  const grams = Number(totalGrams) || 0;
+  if (grams <= 0) return null;
+
+  const key = String(category || "").trim().toLowerCase();
+  const gramsPerServing = CATEGORY_SERVING_GRAMS[key] || DEFAULT_SERVING_GRAMS;
+  let servings = Math.round(grams / gramsPerServing) || 1;
+
+  const kcal = Number(totalCalories) || 0;
+  const kcalPerServing = servings > 0 ? kcal / servings : 0;
+  if (kcal > 0 && (kcalPerServing < PLAUSIBLE_KCAL_PER_SERVING.min || kcalPerServing > PLAUSIBLE_KCAL_PER_SERVING.max)) {
+    servings = Math.round(kcal / FALLBACK_KCAL_PER_SERVING) || 1;
+  }
+
+  return Math.min(MAX_SERVINGS, Math.max(MIN_SERVINGS, servings));
+};
+
 // Attach precomputed nutrition if we have it, else the estimate-pending placeholder.
-const nutritionFor = (idMeal) => {
+const nutritionFor = (idMeal, category) => {
   const c = NUTRITION[String(idMeal)];
   if (!c) {
     return { calories: null, protein: null, carbs: null, fats: null, estimated: true, status: "pending" };
   }
+  const servings = estimateServings(c.totalGrams, c.calories, category);
   return {
     calories: c.calories, protein: c.protein, carbs: c.carbs, fats: c.fats, sugar: c.sugar,
     estimated: true, status: "computed", basis: c.basis || "whole_recipe",
     coverage: c.coverage, lowConfidence: !!c.lowConfidence,
+    servings: servings || 1,
+    servingsEstimated: true,
   };
 };
 
