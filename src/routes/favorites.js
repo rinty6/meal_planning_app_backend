@@ -75,6 +75,17 @@ const normalizeExternalId = (item = {}) => {
   return `title:${title}`;
 };
 
+// Records where a favorite came from so the detail screen can tell a recipe apart
+// from a plain food after a round-trip. Recipes carry a `source`/`type` containing
+// "recipe" or a `recipe_id`; anything else is treated as a food.
+const normalizeFavoriteSource = (item = {}) => {
+  const raw = String(item.source || item.type || "").trim().toLowerCase();
+  if (raw.includes("recipe")) return "fatsecret_recipe";
+  if (raw.includes("food")) return "fatsecret_food";
+  if (item.recipe_id || item.recipeId) return "fatsecret_recipe";
+  return raw || null;
+};
+
 const normalizeFavoriteItem = (item = {}) => ({
   externalId: normalizeExternalId(item),
   title: item.title || item.foodName || "Untitled Item",
@@ -85,6 +96,7 @@ const normalizeFavoriteItem = (item = {}) => ({
   fats: Number(item.fats) || 0,
   cookTime: item.time || "",
   servings: Number(item.servings) || 1,
+  source: normalizeFavoriteSource(item),
 });
 
 const toNumber = (value) => {
@@ -179,6 +191,7 @@ favoritesRoutes.post("/toggle", requireClerkAuth, ensureClerkIdMatch("body"), at
         fats: normalizedItem.fats,
         cookTime: normalizedItem.cookTime,
         servings: normalizedItem.servings,
+        source: normalizedItem.source,
       });
       res.status(201).json({ isFavorite: true, message: "Added to favorites" });
     }
@@ -225,6 +238,7 @@ favoritesRoutes.post("/save-combo", requireClerkAuth, ensureClerkIdMatch("body")
         fats: item.fats,
         cookTime: item.cookTime,
         servings: item.servings,
+        source: item.source,
       });
       savedCount += 1;
     }

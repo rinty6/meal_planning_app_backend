@@ -39,9 +39,15 @@ export const favouritesTable = pgTable('favourites', {
   fats: real('fats').default(0),
   
   // Optional fields (Foods might not have these)
-  cookTime: text("cook_time"), 
+  cookTime: text("cook_time"),
   servings: integer("servings").default(1),
-  
+
+  // Preserves the item's origin (e.g. "fatsecret_recipe" vs "fatsecret_food") so a
+  // loved recipe is still recognizable as a recipe when reopened from the favorites
+  // page. Without it, comboDetail treats the saved externalId as a FatSecret food_id
+  // and calls food.get with a recipe id (404, code 106). Nullable for legacy rows.
+  source: text("source"),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
