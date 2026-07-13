@@ -189,6 +189,13 @@ app.get("/api/health", (req, res) => {
   res.status(200).json(buildHealthPayload());
 });
 
+// This is a JSON API with no crawlable pages. Answer /robots.txt with a blanket
+// disallow so web crawlers (OAI-SearchBot, etc.) get a clean 200 instead of
+// falling through to the unmatched-route warner and spamming the logs.
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').status(200).send('User-agent: *\nDisallow: /\n');
+});
+
 // Mirror backend process telemetry on a guarded route for ops checks.
 // Keep /health and /api/health public; this endpoint exposes process details.
 app.get('/api/health/runtime', requireInternalSecret, (req, res) => {
