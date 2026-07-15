@@ -1,9 +1,12 @@
 // This route handles meal logging, summary retrieval, and recent-meal history.
+// Meal-add responses and threshold notifications use the shared date-aware target,
+// so an expired goal falls back to the onboarding estimate instead of stale/2000 data.
 
 import express from "express";
 import { db } from "../config/db.js";
-import { mealLogsTable, calorieGoalsTable } from "../db/schema.js";
-import { eq, and, desc, lte, gte } from "drizzle-orm";
+import { mealLogsTable } from "../db/schema.js";
+import { eq, and, desc } from "drizzle-orm";
+import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -26,41 +29,6 @@ const parsePositiveIntegerId = (value) => {
   if (!/^\d+$/.test(raw)) return null;
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-};
-
-const getActiveGoalForDate = async (userId, dateStr) => {
-  const activeGoals = await db
-    .select()
-    .from(calorieGoalsTable)
-    .where(and(eq(calorieGoalsTable.userId, userId), lte(calorieGoalsTable.startDate, dateStr), gte(calorieGoalsTable.endDate, dateStr)))
-    .orderBy(desc(calorieGoalsTable.createdAt))
-    .limit(1);
-
-  if (activeGoals.length > 0) return { ...activeGoals[0], isActive: true };
-
-  const latestGoals = await db
-    .select()
-    .from(calorieGoalsTable)
-    .where(eq(calorieGoalsTable.userId, userId))
-    .orderBy(desc(calorieGoalsTable.createdAt))
-    .limit(1);
-  const latestGoal = latestGoals[0] || null;
-  // Keep the latest goal's target for the response's dailyTarget display, but mark
-  // it INACTIVE. A completed/expired goal must never fire a "goal achieved" push,
-  // only a goal whose date range covers today (isActive) may.
-  if (latestGoal?.notificationsEnabled) {
-    return {
-      ...latestGoal,
-      notificationSource: "latest_notification_goal",
-      isActive: false,
-    };
-  }
-
-  return {
-    dailyCalories: 2000,
-    notificationsEnabled: false,
-    isActive: false,
-  };
 };
 
 mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
@@ -106,8 +74,11 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
     }).returning();
     const meal = insertedMeals[0] || null;
 
-    const goal = await getActiveGoalForDate(user.userId, dateStr);
-    const target = toNumber(goal.dailyCalories) || 2000;
+    // Resolve the exact target shown by Home/Summary before calculating whether
+    // this add crossed the user's active threshold.
+    const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
+    const target = targetContext.dailyCalories;
+    const activeGoal = targetContext.source === "goal" ? targetContext.goalRecord : null;
 
     const meals = await db
       .select()
@@ -120,7 +91,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
     const exceededLimit = newTotalCalories > target;
 
     // Send push + save inbox history once when crossing the target threshold for the day.
-    if (user.notificationsMasterEnabled !== false && goal.isActive && goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && activeGoal?.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
@@ -136,6 +107,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       exceededLimit,
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
+      dailyTargetSource: targetContext.source,
       meal,
     });
   } catch (error) {
@@ -175,8 +147,11 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
 
     await db.insert(mealLogsTable).values(mealRows);
 
-    const goal = await getActiveGoalForDate(user.userId, dateStr);
-    const target = toNumber(goal.dailyCalories) || 2000;
+    // Batch adds follow the same policy as single adds; only a real active goal
+    // may trigger a notification, while BMR/default targets still drive progress.
+    const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
+    const target = targetContext.dailyCalories;
+    const activeGoal = targetContext.source === "goal" ? targetContext.goalRecord : null;
 
     const meals = await db
       .select()
@@ -189,7 +164,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
     const reachedTarget = newTotalCalories >= target && previousTotalCalories < target;
     const exceededLimit = newTotalCalories > target;
 
-    if (user.notificationsMasterEnabled !== false && goal.isActive && goal.notificationsEnabled && reachedTarget) {
+    if (user.notificationsMasterEnabled !== false && activeGoal?.notificationsEnabled && reachedTarget) {
       await sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
@@ -205,6 +180,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
       exceededLimit,
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
+      dailyTargetSource: targetContext.source,
       addedCount: mealRows.length,
     });
   } catch (error) {

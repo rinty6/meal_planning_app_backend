@@ -1,14 +1,9 @@
-const DEFAULT_DAILY_CALORIES = 2000;
-const MIN_DAILY_CALORIES = 1200;
+// Historical insights reuse the canonical target resolver for every date in the
+// analysis window, keeping adherence calculations aligned with the daily dashboard.
+import { resolveDailyCalorieTarget } from "./dailyCalorieTarget.js";
+
 const WEEKDAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
-
-const ACTIVITY_MULTIPLIERS = {
-  lightly_active: 1.375,
-  moderately_active: 1.55,
-  very_active: 1.725,
-  super_active: 1.9,
-};
 
 const FOOD_TAG_RULES = [
   {
@@ -117,59 +112,6 @@ const toNumber = (value) => {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-const toKilograms = (weight, unit) => {
-  const parsedWeight = toNumber(weight);
-  if (!parsedWeight) return 0;
-  return unit === "lbs" ? parsedWeight * 0.45359237 : parsedWeight;
-};
-
-const toCentimeters = (height, unit) => {
-  const parsedHeight = toNumber(height);
-  if (!parsedHeight) return 0;
-  return unit === "ft" ? parsedHeight * 30.48 : parsedHeight;
-};
-
-const getAgeFromDateOfBirth = (dateOfBirth) => {
-  if (!dateOfBirth) return 0;
-  const dob = new Date(dateOfBirth);
-  if (Number.isNaN(dob.getTime())) return 0;
-
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const monthDiff = today.getMonth() - dob.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-    age -= 1;
-  }
-  return Math.max(0, age);
-};
-
-const calculateBmr = ({ weightKg, heightCm, age, gender }) => {
-  if (!weightKg || !heightCm || !age) return 0;
-
-  const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
-  if (gender === "male") return base + 5;
-  if (gender === "female") return base - 161;
-  return base - 78;
-};
-
-const estimateDailyCaloriesFromDemographics = (demographics) => {
-  if (!demographics) return 0;
-
-  const weightKg = toKilograms(demographics.weight, demographics.preferredWeightUnit);
-  const heightCm = toCentimeters(demographics.height, demographics.preferredHeightUnit);
-  const age = getAgeFromDateOfBirth(demographics.dateOfBirth);
-  const bmr = calculateBmr({ weightKg, heightCm, age, gender: demographics.gender });
-  if (!bmr) return 0;
-
-  const activityMultiplier = ACTIVITY_MULTIPLIERS[demographics.activityLevel] || ACTIVITY_MULTIPLIERS.moderately_active;
-  let dailyTarget = bmr * activityMultiplier;
-
-  if (demographics.goal === "lose_weight") dailyTarget -= 500;
-  if (demographics.goal === "gain_muscle") dailyTarget += 300;
-
-  return Math.max(MIN_DAILY_CALORIES, Math.round(dailyTarget));
-};
-
 const getLocalYYYYMMDD = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -258,31 +200,8 @@ const createMealSlotScaffold = () =>
   }, {});
 
 const resolveTargetForDate = ({ dateKey, goals, demographics }) => {
-  const matchingGoal = goals.find((goal) => {
-    const startDate = normalizeDateKey(goal?.startDate);
-    const endDate = normalizeDateKey(goal?.endDate);
-    return startDate <= dateKey && endDate >= dateKey;
-  });
-
-  if (matchingGoal) {
-    return {
-      source: "goal",
-      dailyCalories: Math.max(MIN_DAILY_CALORIES, Math.round(toNumber(matchingGoal.dailyCalories) || DEFAULT_DAILY_CALORIES)),
-    };
-  }
-
-  const estimatedCalories = estimateDailyCaloriesFromDemographics(demographics);
-  if (estimatedCalories > 0) {
-    return {
-      source: "bmr",
-      dailyCalories: estimatedCalories,
-    };
-  }
-
-  return {
-    source: "default",
-    dailyCalories: DEFAULT_DAILY_CALORIES,
-  };
+  const target = resolveDailyCalorieTarget({ dateStr: dateKey, goals, demographics });
+  return { source: target.source, dailyCalories: target.dailyCalories };
 };
 
 const buildDailyBreakdown = ({ dateKeys, meals, goals, demographics }) => {

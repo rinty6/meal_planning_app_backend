@@ -1,22 +1,20 @@
 // This route handles calorie goal management, daily summaries, and weekly history.
+// Target selection is intentionally delegated to dailyCalorieTarget.js so these
+// payloads use the same active-goal/onboarding/default rules as Meal Planning.
 
 import express from "express";
 import { db } from "../config/db.js";
 import { calorieGoalsTable, mealLogsTable, demographicsTable } from "../db/schema.js";
 import { and, lte, gte, desc, eq } from "drizzle-orm";
 import { buildCalorieInsights } from "../services/calorieInsights.js";
+import {
+  DEFAULT_DAILY_CALORIES,
+  MIN_DAILY_CALORIES,
+  getDailyCalorieTargetContext,
+} from "../services/dailyCalorieTarget.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 
 const calorieRoutes = express.Router();
-const DEFAULT_DAILY_CALORIES = 2000;
-const MIN_DAILY_CALORIES = 1200;
-
-const ACTIVITY_MULTIPLIERS = {
-  lightly_active: 1.375,
-  moderately_active: 1.55,
-  very_active: 1.725,
-  super_active: 1.9,
-};
 
 const normalizeDateString = (rawDate) => {
   if (typeof rawDate !== "string") return null;
@@ -27,59 +25,6 @@ const normalizeDateString = (rawDate) => {
 const toNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const toKilograms = (weight, unit) => {
-  const parsedWeight = toNumber(weight);
-  if (!parsedWeight) return 0;
-  return unit === "lbs" ? parsedWeight * 0.45359237 : parsedWeight;
-};
-
-const toCentimeters = (height, unit) => {
-  const parsedHeight = toNumber(height);
-  if (!parsedHeight) return 0;
-  return unit === "ft" ? parsedHeight * 30.48 : parsedHeight;
-};
-
-const getAgeFromDateOfBirth = (dateOfBirth) => {
-  if (!dateOfBirth) return 0;
-  const dob = new Date(dateOfBirth);
-  if (Number.isNaN(dob.getTime())) return 0;
-
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const monthDiff = today.getMonth() - dob.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < dob.getDate())) {
-    age -= 1;
-  }
-  return Math.max(0, age);
-};
-
-const calculateBmr = ({ weightKg, heightCm, age, gender }) => {
-  if (!weightKg || !heightCm || !age) return 0;
-
-  const base = 10 * weightKg + 6.25 * heightCm - 5 * age;
-  if (gender === "male") return base + 5;
-  if (gender === "female") return base - 161;
-  return base - 78; // Neutral midpoint between male and female constants.
-};
-
-const estimateDailyCaloriesFromDemographics = (demographics) => {
-  if (!demographics) return 0;
-
-  const weightKg = toKilograms(demographics.weight, demographics.preferredWeightUnit);
-  const heightCm = toCentimeters(demographics.height, demographics.preferredHeightUnit);
-  const age = getAgeFromDateOfBirth(demographics.dateOfBirth);
-  const bmr = calculateBmr({ weightKg, heightCm, age, gender: demographics.gender });
-  if (!bmr) return 0;
-
-  const activityMultiplier = ACTIVITY_MULTIPLIERS[demographics.activityLevel] || ACTIVITY_MULTIPLIERS.moderately_active;
-  let dailyTarget = bmr * activityMultiplier;
-
-  if (demographics.goal === "lose_weight") dailyTarget -= 500;
-  if (demographics.goal === "gain_muscle") dailyTarget += 300;
-
-  return Math.max(MIN_DAILY_CALORIES, Math.round(dailyTarget));
 };
 
 const selectMacroRatios = ({ goal, activityLevel }) => {
@@ -116,61 +61,6 @@ const calculateMacronutrientTargets = ({ calorieTarget, goal, activityLevel }) =
   };
 };
 
-const getDailyCalorieTargetContext = async (userId, dateStr) => {
-  const [demographics, activeGoals] = await Promise.all([
-    db
-      .select()
-      .from(demographicsTable)
-      .where(eq(demographicsTable.userId, userId))
-      .limit(1),
-    db
-      .select()
-      .from(calorieGoalsTable)
-      .where(and(eq(calorieGoalsTable.userId, userId), lte(calorieGoalsTable.startDate, dateStr), gte(calorieGoalsTable.endDate, dateStr)))
-      .orderBy(desc(calorieGoalsTable.createdAt))
-      .limit(1),
-  ]);
-
-  const profile = demographics.length > 0 ? demographics[0] : null;
-
-  if (activeGoals.length > 0) {
-    const activeGoal = activeGoals[0];
-    return {
-      source: "goal",
-      goalRecord: activeGoal,
-      dailyCalories: Math.max(MIN_DAILY_CALORIES, Math.round(toNumber(activeGoal.dailyCalories) || DEFAULT_DAILY_CALORIES)),
-      demographics: profile,
-    };
-  }
-  const estimatedCalories = estimateDailyCaloriesFromDemographics(profile);
-
-  if (estimatedCalories > 0) {
-    return {
-      source: "bmr",
-      goalRecord: {
-        id: "bmr-estimated",
-        goalName: "Estimated Daily Target (BMR)",
-        description: "Auto-calculated from profile demographics",
-        dailyCalories: estimatedCalories,
-      },
-      dailyCalories: estimatedCalories,
-      demographics: profile,
-    };
-  }
-
-  return {
-    source: "default",
-    goalRecord: {
-      id: "default",
-      goalName: "Daily Target (Default)",
-      description: "Fallback default target",
-      dailyCalories: DEFAULT_DAILY_CALORIES,
-    },
-    dailyCalories: DEFAULT_DAILY_CALORIES,
-    demographics: profile,
-  };
-};
-
 const getLocalYYYYMMDD = (d) => {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -194,7 +84,7 @@ const normalizeMealDateKey = (value) => {
 };
 
 const buildDailySummaryPayload = async (userId, dateStr, targetContextOverride = null) => {
-  const targetContext = targetContextOverride || (await getDailyCalorieTargetContext(userId, dateStr));
+  const targetContext = targetContextOverride || (await getDailyCalorieTargetContext({ db, userId, dateStr }));
   const targetCalories = Math.max(MIN_DAILY_CALORIES, Math.round(toNumber(targetContext.dailyCalories) || DEFAULT_DAILY_CALORIES));
 
   const macroGoal = targetContext.demographics?.goal || "maintain";
@@ -505,7 +395,7 @@ calorieRoutes.get("/dashboard/:clerkId/:date", requireClerkAuth, ensureClerkIdMa
 
     const userId = req.dbUser.userId;
 
-    const targetContextPromise = getDailyCalorieTargetContext(userId, dateStr);
+    const targetContextPromise = getDailyCalorieTargetContext({ db, userId, dateStr });
     const weeklyPromise = buildWeeklyPayload(userId, dateStr);
     const targetContext = await targetContextPromise;
 

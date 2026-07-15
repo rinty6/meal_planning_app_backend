@@ -1,15 +1,18 @@
+// Meal Planning V3 recommendations. Daily/meal-slot calorie allocation is resolved
+// by the same service as the calorie dashboard, then included in the cache key so a
+// goal or demographic change cannot reuse recommendations built for an old target.
 import express from "express";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { db } from "../config/db.js";
 import {
-  calorieGoalsTable,
   favouritesTable,
   mealPlanEventsTable,
   mealPlanPreferencesTable,
   usersTable,
 } from "../db/schema.js";
 import { enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
+import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -42,7 +45,6 @@ const ALLOWED_EVENT_TYPES = new Set([
   "shuffled",
 ]);
 const NUTRIENT_KEYS = ["calories", "protein", "carbs", "fat", "fiber", "sugar", "sodium", "cholesterol"];
-const DEFAULT_DAILY_CALORIES = 2000;
 const RECOMMENDATION_CACHE_TTL_MS = 30 * 60 * 1000;
 const recommendationCache = createTtlCache({
   ttlMs: RECOMMENDATION_CACHE_TTL_MS,
@@ -288,17 +290,6 @@ const getSavedPreferences = async (userId) => {
 
   if (!rows[0]) return { ...DEFAULT_PREFERENCES };
   return normalizePreferences(rows[0]);
-};
-
-const getActiveGoalForDate = async (userId, dateStr) => {
-  const rows = await db
-    .select()
-    .from(calorieGoalsTable)
-    .where(and(eq(calorieGoalsTable.userId, userId), lte(calorieGoalsTable.startDate, dateStr), gte(calorieGoalsTable.endDate, dateStr)))
-    .orderBy(desc(calorieGoalsTable.createdAt))
-    .limit(1);
-
-  return Math.max(1200, toNumber(rows[0]?.dailyCalories, DEFAULT_DAILY_CALORIES));
 };
 
 const buildMealTargets = (dailyTarget) => ({
@@ -847,11 +838,19 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     const forceExploration = parseBool(req.query.force_exploration) || parseBool(req.query.forceExploration);
     const explorationSeed = normalizeWhitespace(req.query.exploration_seed || req.query.explorationSeed);
     const dateStr = normalizeDateString(req.query.date);
+    if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
+
     const preferences = normalizePreferences(req.query.preferences ? JSON.parse(String(req.query.preferences)) : await getSavedPreferences(user.userId));
+    // Resolve before checking the recommendation cache: the target is an input to
+    // recommendation generation, not merely display metadata in the response.
+    const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
+    const dailyTarget = targetContext.dailyCalories;
     const cacheKey = JSON.stringify({
       userId: user.userId,
       mealType: selectedMealType || "all",
       dateStr,
+      dailyTarget,
+      targetSource: targetContext.source,
       preferences,
     });
 
@@ -867,8 +866,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     }
 
     const buildPromise = (async () => {
-      const [dailyTarget, mostConsumed, favoriteTitles, eventProfile] = await Promise.all([
-        getActiveGoalForDate(user.userId, dateStr),
+      const [mostConsumed, favoriteTitles, eventProfile] = await Promise.all([
         getMostConsumed(user.userId, 10),
         getFavoriteTitles(user.userId),
         getEventProfile(user.userId),
@@ -895,7 +893,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
 
       // Attach real FatSecret number_of_servings to recipe items (recipes.search never
       // returns it). Cached recipe.get lookups, bounded parallel, best-effort with a
-      // per-lookup timeout — runs BEFORE the payload is cached so the 5-min cache and
+      // per-lookup timeout — runs BEFORE the payload is cached so the 30-min cache and
       // in-flight sharers all serve enriched data.
       try {
         await enrichRecommendationServings(recommendationsByMeal);
@@ -911,6 +909,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
         meal_calorie_targets: mealTargets,
         meal_calorie_target: selectedMealType ? mealTargets[selectedMealType] : undefined,
         daily_calorie_target: dailyTarget,
+        daily_calorie_target_source: targetContext.source,
         most_consumed_items: mostConsumed.all,
         most_consumed_by_meal: mostConsumed.byMeal,
         preferences,
