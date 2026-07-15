@@ -104,6 +104,15 @@ const toNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+// Mutation routes only accept positive integer database ids. Returning 400 for a
+// malformed id avoids passing untrusted text into an integer-column comparison.
+const parsePositiveIntegerId = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
 // 1. SAVE CUSTOM RECIPE (Used by your Recipe Detail Page)
 favoritesRoutes.post("/save-custom", requireClerkAuth, ensureClerkIdMatch("body"), attachUserFromAuth, async (req, res) => {
   try {
@@ -311,15 +320,22 @@ favoritesRoutes.get("/list/:clerkId", requireClerkAuth, ensureClerkIdMatch("para
 // 6. DELETE FAVORITE FOOD (Simple Item)
 favoritesRoutes.delete("/delete-food/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const favoriteId = parsePositiveIntegerId(req.params.id);
+    if (!favoriteId) return res.status(400).json({ error: "Invalid favorite id" });
+
     const deleted = await db
       .delete(favouritesTable)
-      .where(and(eq(favouritesTable.id, id), eq(favouritesTable.userId, req.dbUser.userId)))
+      .where(and(eq(favouritesTable.id, favoriteId), eq(favouritesTable.userId, req.dbUser.userId)))
       .returning();
-    if (deleted.length === 0) {
-      return res.status(404).json({ error: "Favorite not found" });
-    }
-    res.status(200).json({ success: true, message: "Food removed from favorites" });
+
+    // DELETE is idempotent: a duplicate request is successful when the requested
+    // end state (the user's favorite is absent) has already been reached.
+    res.status(200).json({
+      success: true,
+      deleted: deleted.length > 0,
+      alreadyAbsent: deleted.length === 0,
+      message: deleted.length > 0 ? "Food removed from favorites" : "Favorite was already removed",
+    });
   } catch (error) {
     console.error("Delete Food Error:", error);
     res.status(500).json({ error: "Failed to delete food" });
@@ -329,15 +345,20 @@ favoritesRoutes.delete("/delete-food/:id", requireClerkAuth, attachUserFromAuth,
 // 7. DELETE SAVED RECIPE (Custom Detailed Recipe)
 favoritesRoutes.delete("/delete-recipe/:id", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const recipeId = parsePositiveIntegerId(req.params.id);
+    if (!recipeId) return res.status(400).json({ error: "Invalid recipe id" });
+
     const deleted = await db
       .delete(recipesTable)
-      .where(and(eq(recipesTable.id, id), eq(recipesTable.userId, req.dbUser.userId)))
+      .where(and(eq(recipesTable.id, recipeId), eq(recipesTable.userId, req.dbUser.userId)))
       .returning();
-    if (deleted.length === 0) {
-      return res.status(404).json({ error: "Recipe not found" });
-    }
-    res.status(200).json({ success: true, message: "Recipe deleted" });
+
+    res.status(200).json({
+      success: true,
+      deleted: deleted.length > 0,
+      alreadyAbsent: deleted.length === 0,
+      message: deleted.length > 0 ? "Recipe deleted" : "Recipe was already removed",
+    });
   } catch (error) {
     console.error("Delete Recipe Error:", error);
     res.status(500).json({ error: "Failed to delete recipe" });
