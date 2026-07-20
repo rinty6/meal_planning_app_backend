@@ -56,6 +56,16 @@ export const fatSecretLimiter = buildLimiter({
   message: "Too many nutrition lookup requests. Please wait a moment and try again.",
 });
 
+// TheMealDB proxy routes. Split from fatSecretLimiter (2026-07-20): both used to
+// share one bucket, so browsing cuisines/recipes on TheMealDB could exhaust the
+// budget FatSecret food/recipe search also needs, producing false 429s on
+// unrelated screens (e.g. voice search) that never even touched TheMealDB.
+export const theMealDbLimiter = buildLimiter({
+  windowMs: 60_000,
+  max: toPositiveInt(process.env.RATE_LIMIT_THEMEALDB_MAX, 60),
+  message: "Too many recipe lookup requests. Please wait a moment and try again.",
+});
+
 // Image recognition proxy. These requests can be larger and trigger model
 // inference, so keep a dedicated bucket below the global API ceiling.
 export const foodRecognitionLimiter = buildLimiter({

@@ -9,6 +9,7 @@ import {
   feedbackLimiter,
   recommendationLimiter,
   fatSecretLimiter,
+  theMealDbLimiter,
   foodRecognitionLimiter,
   primeLimiter,
   bootstrapLimiter,
@@ -210,7 +211,7 @@ app.use('/api', globalLimiter);
 app.use('/api/users/bootstrap', bootstrapLimiter);
 app.use('/api/recommendation', recommendationLimiter);
 app.use('/api/fatsecret', fatSecretLimiter);
-app.use('/api/themealdb', fatSecretLimiter);
+app.use('/api/themealdb', theMealDbLimiter);
 app.use('/api/food-recognition', foodRecognitionLimiter);
 app.use('/api/meal-plan', recommendationLimiter);
 app.use('/api/prime', primeLimiter);

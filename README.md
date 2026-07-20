@@ -137,6 +137,7 @@ Feature-specific variables:
 - `EMAIL_USER`: optional Gmail SMTP fallback sender account; not needed when `RESEND_API_KEY` is set
 - `EMAIL_PASSWORD`: optional Gmail SMTP fallback app password; not needed when `RESEND_API_KEY` is set
 - `RATE_LIMIT_FATSECRET_MAX`: optional `/api/fatsecret` per-minute IP limit, defaults to `60`
+- `RATE_LIMIT_THEMEALDB_MAX`: optional `/api/themealdb` per-minute IP limit, defaults to `60` (split from `RATE_LIMIT_FATSECRET_MAX` on 2026-07-20 so TheMealDB browsing and FatSecret food/recipe search no longer share one bucket)
 - `RATE_LIMIT_FOOD_RECOGNITION_MAX`: optional `/api/food-recognition` per-minute IP limit, defaults to `30`
 
 ## Local Development
