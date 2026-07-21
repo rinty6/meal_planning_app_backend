@@ -203,6 +203,37 @@ const toDishCard = (meal) => ({
   image: meal.strMealThumb || "",
 });
 
+// Rate-limiter cache probe (mounted in server.js BEFORE theMealDbLimiter) —
+// same contract as canServeFatSecretRequestFromCache in fatsecret.js: requests
+// answerable from local data spend the generous cachedContentLimiter instead of
+// the tight TheMealDB bucket. /areas always qualifies (precomputed local file).
+export const canServeTheMealDbRequestFromCache = (req) => {
+  const path = String(req.path || "");
+
+  if (path === "/areas") return true;
+
+  const areaMatch = path.match(/^\/by-area\/([^/]+)$/);
+  if (areaMatch) {
+    let area = "";
+    try {
+      area = decodeURIComponent(areaMatch[1]).trim();
+    } catch {
+      area = String(areaMatch[1]).trim();
+    }
+    if (!area) return true; // handler 400s without fetching
+    return LIST_CACHE.get(`area:${area.toLowerCase()}`) != null;
+  }
+
+  const recipeMatch = path.match(/^\/recipe\/([^/]+)$/);
+  if (recipeMatch) {
+    const id = String(recipeMatch[1]).trim();
+    if (!/^\d+$/.test(id)) return true; // handler 400s without fetching
+    return RECIPE_CACHE.get(`recipe:${id}`) != null;
+  }
+
+  return true; // unknown shapes 404 in this router — cheap either way
+};
+
 // GET /api/themealdb/areas -> cuisines that actually have recipes, with counts.
 // Served from the precomputed file (the raw a=list is ~192 mostly-empty areas).
 themealdbRoutes.get("/areas", async (req, res) => {

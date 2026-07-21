@@ -3,6 +3,10 @@ import express from "express";
 import {
   getFoodItemById,
   getRecipeDetails,
+  hasCachedFoodDetail,
+  hasCachedFoodSearch,
+  hasCachedRecipeDetail,
+  hasCachedRecipeSearch,
   searchFoodItems,
   searchRecipes,
   serializeFatSecretError,
@@ -27,6 +31,55 @@ const parseMaxResults = (value, fallback) => {
 const parseExpectedCalories = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+// Rate-limiter cache probe (mounted in server.js BEFORE fatSecretLimiter): a
+// request the backend apiCache can already answer costs no FatSecret quota, so
+// it is routed to the generous cachedContentLimiter instead of the tight
+// per-IP FatSecret bucket. Without this, image hydration and screen revisits
+// were charged full price for ~0ms cache reads and starved genuinely new
+// lookups (ERROR_LOG Error 065). Parsing here MUST mirror the route handlers
+// below — each branch reuses the same helpers the handler uses.
+const decodePathSegment = (value) => {
+  try {
+    return decodeURIComponent(String(value || "")).trim();
+  } catch {
+    return String(value || "").trim();
+  }
+};
+
+export const canServeFatSecretRequestFromCache = (req) => {
+  // req.path is relative to the /api/fatsecret mount point.
+  const path = String(req.path || "");
+
+  if (path === "/foods/search") {
+    const query = String(req.query.query || req.query.q || "").trim();
+    const maxResults = parseMaxResults(req.query.maxResults, 10);
+    if (!query) return true; // handler 400s without fetching
+    const foodType = String(req.query.foodType || req.query.food_type || "").trim().toLowerCase();
+    return hasCachedFoodSearch({ query, maxResults, foodType }, maxResults);
+  }
+
+  if (path === "/recipes/search") {
+    const query =
+      String(req.query.query || req.query.q || DEFAULT_RECIPE_SEARCH_QUERY).trim() ||
+      DEFAULT_RECIPE_SEARCH_QUERY;
+    const maxResults = parseMaxResults(req.query.maxResults, 15);
+    return hasCachedRecipeSearch(query, maxResults);
+  }
+
+  const foodMatch = path.match(/^\/foods\/([^/]+)$/);
+  if (foodMatch) {
+    return hasCachedFoodDetail(decodePathSegment(foodMatch[1]), parseExpectedCalories(req.query.expectedCalories));
+  }
+
+  const recipeMatch = path.match(/^\/recipes\/([^/]+)$/);
+  if (recipeMatch) {
+    return hasCachedRecipeDetail(decodePathSegment(recipeMatch[1]));
+  }
+
+  // Unknown shape (404s in this router) — cheap either way.
+  return true;
 };
 
 const respondWithFatSecretError = (res, error) => {

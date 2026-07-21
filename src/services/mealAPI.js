@@ -368,11 +368,53 @@ const extractFoodSearchImage = (item) => {
   return imageArray.find((image) => image?.image_url)?.image_url || null;
 };
 
-export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions = {}) => {
-  const { throwOnError = false, expandQueries } = routeOptions;
-  const input = normalizeSearchInput(queryOrOptions, maxResults, 1);
+// Shared query planning for the two search functions AND their cache probes.
+// The probes below must predict the exact cache keys a search call will use, so
+// planning lives in one place — if it ever forked, the rate limiter would charge
+// (or skip) the wrong requests.
+const planSearchQueries = (queryOrOptions, maxResults, defaultMax, expandQueries) => {
+  const input = normalizeSearchInput(queryOrOptions, maxResults, defaultMax);
   const shouldExpandQueries = expandQueries ?? input.expandQueries;
   const queries = shouldExpandQueries ? buildRetrieverQueries(input) : uniqueStrings([input.query]);
+  return { input, queries };
+};
+
+// Cache probes for the rate limiter (see server.js): a request every one of
+// whose cache keys is already present costs no FatSecret quota and ~0ms, so it
+// should not spend the tight fatSecretLimiter budget. Probes are read-only and
+// synchronous. A key can expire between probe and handler (CACHE_TTL_MS), in
+// which case that one request fetches without having paid a token — rare and
+// bounded, and strictly better than the old behavior of charging cache hits.
+export const hasCachedRecipeSearch = (queryOrOptions, maxResults, routeOptions = {}) => {
+  const { input, queries } = planSearchQueries(queryOrOptions, maxResults, 1, routeOptions.expandQueries);
+  if (queries.length === 0) return true; // the call would return [] without fetching
+  return queries.every(
+    (query) => getCached(makeCacheKey("recipes.search", [query, input.maxResults])) !== null
+  );
+};
+
+export const hasCachedFoodSearch = (queryOrOptions, maxResults, routeOptions = {}) => {
+  const { input, queries } = planSearchQueries(queryOrOptions, maxResults, 3, routeOptions.expandQueries);
+  if (queries.length === 0) return true;
+  return queries.every(
+    (query) => getCached(makeCacheKey("foods.search.v5", [query, input.maxResults, input.foodType])) !== null
+  );
+};
+
+export const hasCachedFoodDetail = (foodId, expectedCalories = 0) => {
+  const normalizedFoodId = String(foodId || "").trim();
+  if (!normalizedFoodId || !isFatSecretNumericId(normalizedFoodId)) return true; // rejected before any fetch
+  return getCached(makeCacheKey("food.get.v5", [normalizedFoodId, expectedCalories])) !== null;
+};
+
+export const hasCachedRecipeDetail = (recipeId) => {
+  if (!recipeId) return true;
+  return getCached(makeCacheKey("recipe.get", [recipeId])) !== null;
+};
+
+export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions = {}) => {
+  const { throwOnError = false, expandQueries } = routeOptions;
+  const { input, queries } = planSearchQueries(queryOrOptions, maxResults, 1, expandQueries);
   if (queries.length === 0) return [];
 
   const mappedResults = await Promise.all(
@@ -437,9 +479,7 @@ export const searchRecipes = async (queryOrOptions, maxResults = 1, routeOptions
 
 export const searchFoodItems = async (queryOrOptions, maxResults = 3, routeOptions = {}) => {
   const { throwOnError = false, expandQueries } = routeOptions;
-  const input = normalizeSearchInput(queryOrOptions, maxResults, 3);
-  const shouldExpandQueries = expandQueries ?? input.expandQueries;
-  const queries = shouldExpandQueries ? buildRetrieverQueries(input) : uniqueStrings([input.query]);
+  const { input, queries } = planSearchQueries(queryOrOptions, maxResults, 3, expandQueries);
   if (queries.length === 0) return [];
 
   const mappedResults = await Promise.all(
@@ -681,36 +721,69 @@ export const getRecipeDetails = async (recipeId, options = {}) => {
 const titleImageCache = new Map();
 const TITLE_IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TITLE_IMAGE_LOOKUP_TIMEOUT_MS = 800;
-const TITLE_IMAGE_ENRICH_MAX_PARALLEL = 12;
+// Worker-pool width and total wall-clock budget for payload image enrichment.
+// 4 workers x 800ms per cold lookup covers ~12 cold titles inside the budget;
+// warm titles (titleImageCache, 24h, shared across users) cost ~0ms each, so a
+// typical post-warmup payload enriches fully in well under 100ms.
+const TITLE_IMAGE_ENRICH_MAX_PARALLEL = 4;
+const TITLE_IMAGE_ENRICH_TIME_BUDGET_MS = 2500;
 
-export const lookupImageForTitle = async (title) => {
+// Detailed variant: `settled` distinguishes a definitive miss (FatSecret answered,
+// no usable image) from a timeout. Only definitive misses are negative-cached and
+// only definitive misses may be marked `image_lookup_state: "unavailable"` in
+// payloads — a timed-out lookup keeps settling in the background (searchFoodItems
+// is itself cached), so the next request for the same title is fast and accurate.
+const lookupImageForTitleDetailed = async (title) => {
   const key = normalizeWord(title);
-  if (!key) return null;
+  if (!key) return { image: null, settled: true };
 
   const cached = titleImageCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
+    return { image: cached.value, settled: true };
   }
 
-  let value = null;
   try {
     const lookup = searchFoodItems(title, 1);
-    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), TITLE_IMAGE_LOOKUP_TIMEOUT_MS));
+    const TIMEOUT_SENTINEL = Symbol("timeout");
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(TIMEOUT_SENTINEL), TITLE_IMAGE_LOOKUP_TIMEOUT_MS));
     const result = await Promise.race([lookup, timeout]);
+
+    if (result === TIMEOUT_SENTINEL) {
+      // Don't cache a null we didn't verify — the pre-2026-07-20 version cached
+      // timeouts as "no image" for 24h, permanently stripping images from foods
+      // that merely had one slow first lookup. Let the search settle silently.
+      lookup.catch(() => {});
+      return { image: null, settled: false };
+    }
+
     const items = Array.isArray(result) ? result : [];
     const found = items.find((item) => typeof item?.image === "string" && item.image.startsWith("http"));
-    value = found?.image || null;
+    const value = found?.image || null;
+    titleImageCache.set(key, { value, expiresAt: Date.now() + TITLE_IMAGE_CACHE_TTL_MS });
+    return { image: value, settled: true };
   } catch {
-    value = null;
+    return { image: null, settled: false };
   }
-
-  titleImageCache.set(key, { value, expiresAt: Date.now() + TITLE_IMAGE_CACHE_TTL_MS });
-  return value;
 };
 
-// Walks a recommendations-by-meal payload and fills missing image fields via FatSecret search.
-export const enrichRecommendationImages = async (recommendationsByMeal) => {
+export const lookupImageForTitle = async (title) => (await lookupImageForTitleDetailed(title)).image;
+
+// Walks a recommendations-shaped payload ({ anyKey: [entries...] }) and fills
+// missing image fields via FatSecret search. Rewritten 2026-07-20 (Fix B): the
+// old version sliced targets to the first 12 and fired them all at once, so a
+// 30-item payload shipped mostly imageless and every client then re-resolved
+// images itself — 1-20 proxy requests PER ITEM per device (ERROR_LOG Error 065).
+// Now a small worker pool covers EVERY target within a time budget, and
+// definitive misses are stamped image_lookup_state:"unavailable" so clients
+// render their local placeholder instead of hunting. titleImageCache is shared
+// across all users, so after warmup this typically costs ~0ms and 0 requests.
+export const enrichRecommendationImages = async (recommendationsByMeal, options = {}) => {
   if (!recommendationsByMeal || typeof recommendationsByMeal !== "object") return recommendationsByMeal;
+  const {
+    maxParallel = TITLE_IMAGE_ENRICH_MAX_PARALLEL,
+    timeBudgetMs = TITLE_IMAGE_ENRICH_TIME_BUDGET_MS,
+    markMisses = true,
+  } = options;
 
   const targets = [];
   for (const mealType of Object.keys(recommendationsByMeal)) {
@@ -727,14 +800,25 @@ export const enrichRecommendationImages = async (recommendationsByMeal) => {
 
   if (targets.length === 0) return recommendationsByMeal;
 
-  // Bound parallelism so a single recommendation response never burns the FatSecret quota or stalls the route.
-  const slice = targets.slice(0, TITLE_IMAGE_ENRICH_MAX_PARALLEL);
-  await Promise.all(
-    slice.map(async (entry) => {
-      const image = await lookupImageForTitle(entry.title);
-      if (image) entry.image = image;
-    })
-  );
+  const deadline = Date.now() + timeBudgetMs;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length && Date.now() < deadline) {
+      const entry = targets[cursor];
+      cursor += 1;
+      const { image, settled } = await lookupImageForTitleDetailed(entry.title);
+      if (image) {
+        entry.image = image;
+        entry.image_lookup_state = "resolved";
+      } else if (settled && markMisses) {
+        entry.image_lookup_state = "unavailable";
+      }
+      // Not settled (timeout) → leave pending; the background settle warms the
+      // cache so the next payload for this title resolves instantly.
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.max(1, maxParallel) }, worker));
 
   return recommendationsByMeal;
 };

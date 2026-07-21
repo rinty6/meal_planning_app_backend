@@ -10,9 +10,11 @@ import {
   recommendationLimiter,
   fatSecretLimiter,
   theMealDbLimiter,
+  cachedContentLimiter,
   foodRecognitionLimiter,
   primeLimiter,
   bootstrapLimiter,
+  rateLimitTelemetry,
 } from './middleware/rateLimit.js';
 import job from './config/cron.js';
 import demographicsRoutes from './routes/demographics.js';
@@ -21,7 +23,7 @@ import favoritesRoutes from './routes/favorites.js';
 import shoppingRoutes from './routes/shopping.js';
 import calorieRoutes from './routes/calorie.js';
 import recommendationRoutes from './routes/recommendation.js';
-import fatSecretRoutes from './routes/fatsecret.js';
+import fatSecretRoutes, { canServeFatSecretRequestFromCache } from './routes/fatsecret.js';
 import mealPlanRoutes, { ensureMealPlanStorage } from './routes/mealPlan.js';
 import {
   ensureRecommendationFeedbackStorage,
@@ -34,7 +36,7 @@ import notificationRoutes from './routes/notifications.js';
 import internalRoutes from './routes/internal.js';
 import primeRoutes from './routes/prime.js';
 import foodRecognitionRoutes from './routes/foodRecognition.js';
-import themealdbRoutes from './routes/themealdb.js';
+import themealdbRoutes, { canServeTheMealDbRequestFromCache } from './routes/themealdb.js';
 
 import userRoutes from './routes/users.js';
 import feedbackRoutes from './routes/feedback.js';
@@ -204,18 +206,56 @@ app.get('/api/health/runtime', requireInternalSecret, (req, res) => {
 });
 
 // Global rate-limit ceiling for all API routes. Health checks above are defined
-// earlier, so they remain exempt.
+// earlier, so they remain exempt. Routes with a dedicated bucket below are
+// skipped inside the limiter (DEDICATED_BUCKET_PREFIXES in middleware/rateLimit.js)
+// so e.g. image-hydration bursts on /api/fatsecret cannot drain the budget that
+// calorie summary or notifications depend on.
 app.use('/api', globalLimiter);
 
 // Tighter per-route limiters on abuse-prone / expensive surfaces.
-app.use('/api/users/bootstrap', bootstrapLimiter);
-app.use('/api/recommendation', recommendationLimiter);
-app.use('/api/fatsecret', fatSecretLimiter);
-app.use('/api/themealdb', theMealDbLimiter);
-app.use('/api/food-recognition', foodRecognitionLimiter);
-app.use('/api/meal-plan', recommendationLimiter);
-app.use('/api/prime', primeLimiter);
-app.use('/api/feedback', feedbackLimiter);
+// FatSecret/TheMealDB requests the backend cache can already answer cost no
+// third-party quota, so they are metered by the generous cachedContentLimiter
+// instead of the tight per-provider buckets — repeat screen visits stay free
+// even while the tight bucket is exhausted.
+const tagBucket = (name, limiter) => (req, res, next) => {
+  res.locals.rateLimitBucket = name; // read by rateLimitTelemetry below
+  return limiter(req, res, next);
+};
+
+app.use('/api/users/bootstrap', tagBucket('bootstrap', bootstrapLimiter));
+app.use('/api/recommendation', tagBucket('recommend', recommendationLimiter));
+app.use('/api/fatsecret', (req, res, next) =>
+  canServeFatSecretRequestFromCache(req)
+    ? tagBucket('cached', cachedContentLimiter)(req, res, next)
+    : tagBucket('fatsecret', fatSecretLimiter)(req, res, next));
+app.use('/api/themealdb', (req, res, next) =>
+  canServeTheMealDbRequestFromCache(req)
+    ? tagBucket('cached', cachedContentLimiter)(req, res, next)
+    : tagBucket('themealdb', theMealDbLimiter)(req, res, next));
+app.use('/api/food-recognition', tagBucket('foodrecog', foodRecognitionLimiter));
+app.use('/api/meal-plan', tagBucket('recommend', recommendationLimiter));
+app.use('/api/prime', tagBucket('prime', primeLimiter));
+app.use('/api/feedback', tagBucket('feedback', feedbackLimiter));
+
+// Local-dev-only: log which bucket each request charged and how much headroom is
+// left, so a slow screen or an unexpected 429 can be traced to the exact routes
+// that spent the budget instead of guessed at.
+//
+// The Railway check is NOT redundant with the NODE_ENV check: ENV.NODE_ENV falls
+// back to 'development' when the variable is unset, so keying off it alone would
+// log a line for EVERY request in production if Railway did not set NODE_ENV.
+// Same reasoning as shouldStartScheduledJobs() above. Set RATE_LIMIT_TELEMETRY=true
+// to force it on temporarily when debugging a deployed environment.
+const isRailwayRuntime = Boolean(
+  process.env.RAILWAY_ENVIRONMENT ||
+  process.env.RAILWAY_PROJECT_ID ||
+  process.env.RAILWAY_SERVICE_ID
+);
+const telemetryEnabled = isTruthyEnv(process.env.RATE_LIMIT_TELEMETRY)
+  || (ENV.NODE_ENV !== 'production' && !isRailwayRuntime);
+if (telemetryEnabled) {
+  app.use('/api', rateLimitTelemetry);
+}
 
 // Body limits: a tight 1 MB default protects the ~40 JSON routes; routes that
 // legitimately accept base64 images (feedback photo, manual-food photo, recipe

@@ -11,7 +11,7 @@ import {
   mealPlanPreferencesTable,
   usersTable,
 } from "../db/schema.js";
-import { enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
+import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
@@ -892,13 +892,21 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
       );
 
       // Attach real FatSecret number_of_servings to recipe items (recipes.search never
-      // returns it). Cached recipe.get lookups, bounded parallel, best-effort with a
-      // per-lookup timeout — runs BEFORE the payload is cached so the 30-min cache and
-      // in-flight sharers all serve enriched data.
+      // returns it), and resolve missing images SERVER-SIDE (Fix B, 2026-07-20).
+      // Before this, imageless items shipped to the phone and every client re-resolved
+      // them itself at 1-20 proxy requests per item per device — the root cause of the
+      // TestFlight 429 storms (ERROR_LOG Error 065). Server resolution uses the shared
+      // titleImageCache (24h, all users), stamps definitive misses as
+      // image_lookup_state:"unavailable" so clients stop hunting, and runs BEFORE the
+      // payload is cached so the 30-min cache and in-flight sharers all serve enriched
+      // data. most_consumed items ride along in the same walk under an extra key.
       try {
-        await enrichRecommendationServings(recommendationsByMeal);
+        await Promise.all([
+          enrichRecommendationServings(recommendationsByMeal),
+          enrichRecommendationImages({ ...recommendationsByMeal, most_consumed: mostConsumed.all }),
+        ]);
       } catch (enrichError) {
-        console.warn("Meal plan servings enrichment failed (non-fatal):", enrichError?.message || enrichError);
+        console.warn("Meal plan enrichment failed (non-fatal):", enrichError?.message || enrichError);
       }
 
       const payload = {

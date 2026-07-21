@@ -136,7 +136,8 @@ Feature-specific variables:
 - `FEEDBACK_FROM_EMAIL`: required sender identity for Resend, for example `GoodHealthMate Feedback <feedback@mail.dreamingstudio.net>`
 - `EMAIL_USER`: optional Gmail SMTP fallback sender account; not needed when `RESEND_API_KEY` is set
 - `EMAIL_PASSWORD`: optional Gmail SMTP fallback app password; not needed when `RESEND_API_KEY` is set
-- `RATE_LIMIT_FATSECRET_MAX`: optional `/api/fatsecret` per-minute IP limit, defaults to `60`
+- `RATE_LIMIT_FATSECRET_MAX`: optional `/api/fatsecret` per-minute IP limit, defaults to `60`. Since 2026-07-20 this meters **cache-miss traffic only** — requests the backend's in-memory cache can answer are metered by `RATE_LIMIT_CACHED_MAX` instead
+- `RATE_LIMIT_CACHED_MAX`: optional per-minute IP limit for FatSecret/TheMealDB requests served from the backend cache (no third-party quota spent), defaults to `600`. Flood guard only — normal use should never reach it
 - `RATE_LIMIT_THEMEALDB_MAX`: optional `/api/themealdb` per-minute IP limit, defaults to `60` (split from `RATE_LIMIT_FATSECRET_MAX` on 2026-07-20 so TheMealDB browsing and FatSecret food/recipe search no longer share one bucket)
 - `RATE_LIMIT_FOOD_RECOGNITION_MAX`: optional `/api/food-recognition` per-minute IP limit, defaults to `30`
 
