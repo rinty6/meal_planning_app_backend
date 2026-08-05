@@ -7,6 +7,7 @@ import { db } from "../config/db.js";
 import { mealLogsTable } from "../db/schema.js";
 import { eq, and, desc } from "drizzle-orm";
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
+import { getCalorieTargetBand, resolveCalorieZone } from "../services/calorieTargetBand.js";
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -87,16 +88,34 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
 
     const newTotalCalories = meals.reduce((sum, m) => sum + toNumber(m.calories), 0);
     const previousTotalCalories = Math.max(0, newTotalCalories - toNumber(calories));
-    const reachedTarget = newTotalCalories >= target && previousTotalCalories < target;
-    const exceededLimit = newTotalCalories > target;
+
+    // Tolerance band, not an exact hit — see services/calorieTargetBand.js and
+    // ERROR_LOG Error 074. `reachedTarget` is edge-triggered on ENTERING the band
+    // from below so it fires once per day, and `exceededLimit` now means "past the
+    // top of the band" rather than "one calorie over target". The two field names
+    // are kept because older app builds still read them and there is no OTA path;
+    // their meaning is what was broken, so improving it fixes those builds too.
+    const targetZone = resolveCalorieZone(newTotalCalories, target);
+    const previousZone = resolveCalorieZone(previousTotalCalories, target);
+    const targetBand = getCalorieTargetBand(target);
+    const reachedTarget = targetZone === "on_target" && previousZone === "under";
+    const exceededLimit = targetZone === "over";
 
     // Send push + save inbox history once when crossing the target threshold for the day.
+    //
+    // Fire-and-forget: sendNotificationToUser waits 1200ms for Expo delivery
+    // receipts, and awaiting it here made the meal that crosses the target over a
+    // second slower to confirm than every other meal. The user is waiting on
+    // "Meal added", not on a push receipt. Errors are logged, never surfaced —
+    // a push failure must not fail a save that already succeeded.
     if (user.notificationsMasterEnabled !== false && activeGoal?.notificationsEnabled && reachedTarget) {
-      await sendNotificationToUser({
+      void sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
-        body: `Congratulations! You've met your calorie target of ${target} kcal today.`,
+        body: `Nice work — you're on target for today, around your ${target} kcal goal.`,
         data: { screen: "/(tabs)/profile/notifications", type: "goal_achieved" },
+      }).catch((error) => {
+        console.error("goal_achieved push failed (meal add):", error);
       });
     }
 
@@ -105,6 +124,10 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       message: "Meal added successfully",
       reachedTarget,
       exceededLimit,
+      // New clients read targetZone; the two booleans above stay for older builds.
+      targetZone,
+      targetBandLower: Math.round(targetBand.lower),
+      targetBandUpper: Math.round(targetBand.upper),
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
       dailyTargetSource: targetContext.source,
@@ -161,15 +184,24 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
     const addedCalories = mealRows.reduce((sum, item) => sum + toNumber(item.calories), 0);
     const newTotalCalories = meals.reduce((sum, m) => sum + toNumber(m.calories), 0);
     const previousTotalCalories = Math.max(0, newTotalCalories - addedCalories);
-    const reachedTarget = newTotalCalories >= target && previousTotalCalories < target;
-    const exceededLimit = newTotalCalories > target;
 
+    // Same tolerance band as the single-add route above.
+    const targetZone = resolveCalorieZone(newTotalCalories, target);
+    const previousZone = resolveCalorieZone(previousTotalCalories, target);
+    const targetBand = getCalorieTargetBand(target);
+    const reachedTarget = targetZone === "on_target" && previousZone === "under";
+    const exceededLimit = targetZone === "over";
+
+    // Fire-and-forget for the same reason as the single-meal route above: the
+    // 1200ms receipt wait must not delay the user's "Meal added" confirmation.
     if (user.notificationsMasterEnabled !== false && activeGoal?.notificationsEnabled && reachedTarget) {
-      await sendNotificationToUser({
+      void sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
-        body: `Congratulations! You've met your calorie target of ${target} kcal today.`,
+        body: `Nice work — you're on target for today, around your ${target} kcal goal.`,
         data: { screen: "/(tabs)/profile/notifications", type: "goal_achieved" },
+      }).catch((error) => {
+        console.error("goal_achieved push failed (batch add):", error);
       });
     }
 
@@ -178,6 +210,9 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
       message: "Meal added successfully",
       reachedTarget,
       exceededLimit,
+      targetZone,
+      targetBandLower: Math.round(targetBand.lower),
+      targetBandUpper: Math.round(targetBand.upper),
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
       dailyTargetSource: targetContext.source,
