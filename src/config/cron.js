@@ -1,6 +1,6 @@
 import cron from "cron";
 import dotenv from "dotenv";
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "./db.js";
 import {
     calorieGoalsTable,
@@ -9,6 +9,7 @@ import {
     userDevicesTable,
     usersTable,
 } from "../db/schema.js";
+import { resolveCalorieZone } from "../services/calorieTargetBand.js";
 import {
     cleanupOldNotifications,
     sendNotificationToUser,
@@ -28,19 +29,65 @@ const DISPATCH_CRON = "*/15 * * * *";
 const DISPATCH_WINDOW_MINUTES = 15;
 const DISPATCH_LOG_RETENTION_DAYS = 3;
 
-// Meal reminders are keyed by LOCAL hour and are INDEPENDENT of any calorie goal
-// (Phase 3 decoupling). They require only: a device + the master switch on.
-const MEAL_REMINDERS_BY_HOUR = {
-    8: { type: "breakfast", title: "Breakfast Reminder", body: "Don't forget to log your breakfast. Start your day on track!" },
-    12: { type: "lunch", title: "Lunch Reminder", body: "Don't forget to log your lunch. Stay on track with your goals!" },
-    18: { type: "dinner", title: "Dinner Reminder", body: "Don't forget to log your dinner. Finish the day strong!" },
+// SKIP-CHECKS, not pre-meal alarms (Pip Phase 4, 2026-08-05).
+//
+// The old scheme nudged at 8/12/18 whether or not the meal had been logged,
+// which meant the most diligent users got reminded to do the thing they had
+// already done. These fire AFTER each meal window closes and ONLY when nothing
+// was logged against that meal, so a user who logs on time hears nothing.
+//
+// Hours match the windows in meal_app/components/pip/pipHomeState.ts
+// (breakfast 7-10, lunch 11-14, dinner 17-20) — each check sits on the closing
+// edge of its window. They remain INDEPENDENT of any calorie goal (Phase 3
+// decoupling): a device + the master switch is the whole eligibility test.
+const MEAL_SKIP_CHECKS_BY_HOUR = {
+    10: {
+        type: "breakfast",
+        title: "A fresh start, mate!",
+        body: "Quick brekkie now can help set up the rest of your day.",
+    },
+    14: {
+        type: "lunch",
+        title: "Still plenty of day left!",
+        body: "Little feed now can help carry you through the arvo.",
+    },
+    20: {
+        type: "dinner",
+        title: "You’ve got this, mate!",
+        body: "Simple dinner can help you wind down and finish the day well.",
+    },
 };
-const MEAL_REMINDERS_BY_TYPE = Object.fromEntries(
-    Object.entries(MEAL_REMINDERS_BY_HOUR).map(([hour, def]) => [def.type, { hour: Number(hour), ...def }])
+const MEAL_SKIP_CHECKS_BY_TYPE = Object.fromEntries(
+    Object.entries(MEAL_SKIP_CHECKS_BY_HOUR).map(([hour, def]) => [def.type, { hour: Number(hour), ...def }])
 );
+const MEAL_SKIP_TYPES = Object.keys(MEAL_SKIP_CHECKS_BY_TYPE);
 
-// The 20:00 calorie summary still requires a notification-enabled calorie goal.
-const SUMMARY_HOUR = 20;
+// The calorie summary still requires a notification-enabled calorie goal. It sits
+// an hour after the dinner skip-check so the two never read as one burst.
+const SUMMARY_HOUR = 21;
+
+// Anti-nag cap: 2 pushes per user per local day, total. The summary reserves one
+// slot, which leaves exactly one meal skip-check — the first that comes due.
+// Someone skipping all three meals hears about it once, not three times.
+const MAX_MEAL_NUDGES_PER_DAY = 1;
+
+// End-of-day copy, keyed by the tolerance band in services/calorieTargetBand.js.
+// Pip never scolds: "over" is reassurance, not a telling-off.
+const SUMMARY_COPY = {
+    on_target: {
+        title: "Nailed it, mate!",
+        body: (consumed, target) =>
+            `${consumed} kcal against your ${target} kcal target. That’s the day done right.`,
+    },
+    under: {
+        title: "No dramas, mate!",
+        body: () => "You didn’t quite hit today’s target—tomorrow’s a fresh go.",
+    },
+    over: {
+        title: "Big day, and that’s alright!",
+        body: () => "One day over doesn’t undo a good week. Back at it tomorrow.",
+    },
+};
 
 const toNumber = (value) => {
     const parsed = Number(value);
@@ -129,7 +176,32 @@ const cleanupOldDispatchLogs = async () => {
     await db.delete(notificationDispatchLogTable).where(lte(notificationDispatchLogTable.createdAt, cutoff));
 };
 
-const sendMealReminderToUser = async ({ userId, reminderType, title, body }) => {
+// How many meal nudges this user has already had today. The dispatch log is
+// already the dedup ledger, so it doubles as the anti-nag counter for free —
+// no extra table, and it is pruned by the same retention job.
+const countMealNudgesToday = async (userId, localDate) => {
+    const rows = await db
+        .select({ id: notificationDispatchLogTable.id })
+        .from(notificationDispatchLogTable)
+        .where(
+            and(
+                eq(notificationDispatchLogTable.userId, userId),
+                eq(notificationDispatchLogTable.localDate, localDate),
+                inArray(notificationDispatchLogTable.reminderType, MEAL_SKIP_TYPES)
+            )
+        );
+    return rows.length;
+};
+
+const getLoggedMealTypesForDay = async (userId, localDate) => {
+    const rows = await db
+        .select({ mealType: mealLogsTable.mealType })
+        .from(mealLogsTable)
+        .where(and(eq(mealLogsTable.userId, userId), eq(mealLogsTable.date, localDate)));
+    return new Set(rows.map((row) => String(row.mealType || "").trim().toLowerCase()));
+};
+
+const sendMealSkipCheckToUser = async ({ userId, reminderType, title, body }) => {
     const result = await sendNotificationToUser({
         userId,
         title,
@@ -156,16 +228,27 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
         .where(and(eq(mealLogsTable.userId, userId), eq(mealLogsTable.date, localDate)));
 
     const consumed = meals.reduce((sum, meal) => sum + toNumber(meal.calories), 0);
-    const title = consumed > target ? "Calorie Update" : "Great Job!";
-    const body = consumed > target
-        ? `You went ${Math.round(consumed - target)} kcal over your goal. Tomorrow is a new day!`
-        : `You stayed under your goal of ${target} kcal. Keep it up!`;
+
+    // The old copy was a two-way split on `consumed > target`, which praised
+    // ("You stayed under your goal") a user who ate 900 of 2200 kcal — the exact
+    // person the missed-target message is for. The ±10% band gives three honest
+    // outcomes instead. See services/calorieTargetBand.js.
+    const zone = resolveCalorieZone(consumed, target);
+    const copy = SUMMARY_COPY[zone];
+    const title = copy.title;
+    const body = copy.body(Math.round(consumed).toLocaleString("en-US"), Math.round(target).toLocaleString("en-US"));
 
     const result = await sendNotificationToUser({
         userId,
         title,
         body,
-        data: { type: "daily_summary", date: localDate, screen: "/(tabs)/profile/notifications" },
+        data: {
+            type: "daily_summary",
+            date: localDate,
+            zone,
+            pip: zone === "on_target" ? "happy" : zone === "over" ? "confident" : "care",
+            screen: "/(tabs)/profile/notifications",
+        },
     });
     return { eligible: true, sent: result?.sent ?? 0 };
 };
@@ -173,7 +256,16 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
 // ---------------------------------------------------------------------------
 // The dispatcher — runs every 15 min, sends each due reminder at LOCAL time.
 // ---------------------------------------------------------------------------
-export const runReminderDispatch = async ({ restrictToUserId = null } = {}) => {
+// `forceHour` / `resetToday` exist ONLY for the manual trigger in routes/internal.js.
+// The scheduled job never passes them. Without them the new conditional logic is
+// untestable on demand: the force runners bypass the gates entirely, and a real
+// tick only does anything at 10:00/14:00/20:00/21:00 local — and then only once
+// per day, so you would get one shot at observing the cap.
+export const runReminderDispatch = async ({
+    restrictToUserId = null,
+    forceHour = null,
+    resetToday = false,
+} = {}) => {
     await cleanupOldNotifications();
     await cleanupOldDispatchLogs();
 
@@ -184,17 +276,45 @@ export const runReminderDispatch = async ({ restrictToUserId = null } = {}) => {
     users = users.filter((user) => eligibleIds.has(user.userId));
     if (restrictToUserId != null) users = users.filter((user) => user.userId === restrictToUserId);
 
-    const dispatched = { breakfast: 0, lunch: 0, dinner: 0, summary: 0 };
+    const dispatched = { breakfast: 0, lunch: 0, dinner: 0, summary: 0, skippedAlreadyLogged: 0, skippedNagCap: 0 };
 
     for (const user of users) {
-        const { localDate, hour, minute } = getLocalParts(user.timezone);
-        if (minute >= DISPATCH_WINDOW_MINUTES) continue; // only the top-of-hour bucket
+        const parts = getLocalParts(user.timezone);
+        const { localDate, minute } = parts;
+        const hour = forceHour == null ? parts.hour : Number(forceHour);
+        // The minute gate keeps the 15-min cron to one bucket per local hour. A
+        // forced run has no bucket to collide with, so it does not apply.
+        if (forceHour == null && minute >= DISPATCH_WINDOW_MINUTES) continue;
 
-        const meal = MEAL_REMINDERS_BY_HOUR[hour];
+        if (resetToday) {
+            await db
+                .delete(notificationDispatchLogTable)
+                .where(
+                    and(
+                        eq(notificationDispatchLogTable.userId, user.userId),
+                        eq(notificationDispatchLogTable.localDate, localDate)
+                    )
+                );
+        }
+
+        const meal = MEAL_SKIP_CHECKS_BY_HOUR[hour];
         if (meal) {
+            // Nothing to nudge about if they already ate and logged it. Checked
+            // before the claim so a logged meal does not burn the dedup slot.
+            const logged = await getLoggedMealTypesForDay(user.userId, localDate);
+            if (logged.has(meal.type)) {
+                dispatched.skippedAlreadyLogged += 1;
+                continue;
+            }
+
+            if ((await countMealNudgesToday(user.userId, localDate)) >= MAX_MEAL_NUDGES_PER_DAY) {
+                dispatched.skippedNagCap += 1;
+                continue;
+            }
+
             const claimed = await claimDispatch(user.userId, meal.type, localDate);
             if (!claimed) continue;
-            await sendMealReminderToUser({
+            await sendMealSkipCheckToUser({
                 userId: user.userId,
                 reminderType: meal.type,
                 title: meal.title,
@@ -207,7 +327,7 @@ export const runReminderDispatch = async ({ restrictToUserId = null } = {}) => {
             const { eligible } = await sendDailySummaryToUser({ userId: user.userId, localDate });
             if (eligible) dispatched.summary += 1;
             // If not eligible (no goal), the claim simply prevents re-checking
-            // this user again during today's local-8pm bucket.
+            // this user again during today's local-9pm bucket.
         }
     }
 
@@ -218,8 +338,8 @@ export const runReminderDispatch = async ({ restrictToUserId = null } = {}) => {
 // Force runners for the manual trigger endpoint (routes/internal.js). These
 // IGNORE local time and the dedup log so an admin can fire a job on demand.
 // ---------------------------------------------------------------------------
-const runMealReminderForce = async ({ reminderType, restrictToUserId = null }) => {
-    const def = MEAL_REMINDERS_BY_TYPE[reminderType];
+const runMealSkipCheckForce = async ({ reminderType, restrictToUserId = null }) => {
+    const def = MEAL_SKIP_CHECKS_BY_TYPE[reminderType];
     if (!def) return { reminderType, recipientCount: 0, sent: 0 };
 
     let userIds = await getMealReminderEligibleUserIds();
@@ -227,17 +347,17 @@ const runMealReminderForce = async ({ reminderType, restrictToUserId = null }) =
 
     let sent = 0;
     for (const userId of userIds) {
-        sent += await sendMealReminderToUser({ userId, reminderType, title: def.title, body: def.body });
+        sent += await sendMealSkipCheckToUser({ userId, reminderType, title: def.title, body: def.body });
     }
     return { reminderType, recipientCount: userIds.length, sent };
 };
 
 export const runBreakfastReminder = ({ restrictToUserId = null } = {}) =>
-    runMealReminderForce({ reminderType: "breakfast", restrictToUserId });
+    runMealSkipCheckForce({ reminderType: "breakfast", restrictToUserId });
 export const runLunchReminder = ({ restrictToUserId = null } = {}) =>
-    runMealReminderForce({ reminderType: "lunch", restrictToUserId });
+    runMealSkipCheckForce({ reminderType: "lunch", restrictToUserId });
 export const runDinnerReminder = ({ restrictToUserId = null } = {}) =>
-    runMealReminderForce({ reminderType: "dinner", restrictToUserId });
+    runMealSkipCheckForce({ reminderType: "dinner", restrictToUserId });
 
 export const runDailySummary = async ({ restrictToUserId = null } = {}) => {
     let users = await db.select().from(usersTable);
@@ -282,6 +402,8 @@ const dispatchJob = new cron.CronJob(DISPATCH_CRON, async function () {
         if (total > 0) {
             console.log("Reminder dispatch tick sent notifications:", result);
         }
+        // Suppressions are the interesting signal now that skip-checks are
+        // conditional — a tick that sends nothing is the expected happy path.
     } catch (error) {
         console.error("Reminder dispatch tick failed:", error);
     }
@@ -293,9 +415,10 @@ const cronManager = {
         console.log("Notification dispatcher started", {
             schedule: DISPATCH_CRON,
             fallbackTimeZone: NOTIFICATION_TIME_ZONE,
-            mealRemindersLocal: Object.values(MEAL_REMINDERS_BY_TYPE).map((d) => `${d.type}@${d.hour}:00`),
+            mealSkipChecksLocal: Object.values(MEAL_SKIP_CHECKS_BY_TYPE).map((d) => `${d.type}@${d.hour}:00`),
             summaryHourLocal: SUMMARY_HOUR,
-            note: "Reminders fire at each user's LOCAL time using users.timezone",
+            maxMealNudgesPerDay: MAX_MEAL_NUDGES_PER_DAY,
+            note: "Skip-checks fire at each user's LOCAL time (users.timezone) and only when that meal is unlogged",
         });
     },
 };
