@@ -60,17 +60,29 @@ const fetchDeviceRows = async (userIds) => {
     .where(inArray(userDevicesTable.userId, userIds));
 };
 
-const buildMessages = ({ deviceRows, title, body, data }) => {
+const buildMessages = ({ deviceRows, title, body, data, imageUrl }) => {
   const payload = sanitizePayload(data);
   return deviceRows
     .filter((row) => Expo.isExpoPushToken(row.pushToken))
-    .map((row) => ({
-      to: row.pushToken,
-      sound: "default",
-      title,
-      body,
-      data: payload,
-    }));
+    .map((row) => {
+      const message = {
+        to: row.pushToken,
+        sound: "default",
+        title,
+        body,
+        data: payload,
+      };
+      // Artwork is strictly additive. Android renders richContent as a
+      // BigPictureStyle with no native work; iOS ignores it unless the app
+      // ships a Notification Service Extension, and mutableContent is what
+      // wakes that extension so it can download the image and attach it.
+      // Either way the notification still reads correctly as text alone.
+      if (imageUrl) {
+        message.richContent = { image: imageUrl };
+        message.mutableContent = true;
+      }
+      return message;
+    });
 };
 
 const getInvalidFormatTokenCount = (deviceRows) => {
@@ -202,10 +214,11 @@ export const sendNotificationToUser = async ({
   title,
   body,
   data = {},
+  imageUrl = null,
 }) => {
   await saveNotification({ userId, title, body, data });
   const deviceRows = await fetchDeviceRows([userId]);
-  const messages = buildMessages({ deviceRows, title, body, data });
+  const messages = buildMessages({ deviceRows, title, body, data, imageUrl });
   logDeviceCoverage({ scope: "single_user", userIds: [userId], deviceRows, messages });
   return sendMessagesInChunks(messages);
 };
@@ -216,13 +229,14 @@ export const sendNotificationToUsers = async ({
   title,
   body,
   data = {},
+  imageUrl = null,
 }) => {
   const uniqueUserIds = [...new Set((userIds || []).filter(Boolean))];
   if (!uniqueUserIds.length) return { sent: 0, invalidTokensRemoved: 0 };
 
   await saveNotificationsForUsers({ userIds: uniqueUserIds, title, body, data });
   const deviceRows = await fetchDeviceRows(uniqueUserIds);
-  const messages = buildMessages({ deviceRows, title, body, data });
+  const messages = buildMessages({ deviceRows, title, body, data, imageUrl });
   logDeviceCoverage({ scope: "bulk_users", userIds: uniqueUserIds, deviceRows, messages });
   return sendMessagesInChunks(messages);
 };

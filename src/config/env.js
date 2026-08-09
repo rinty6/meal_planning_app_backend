@@ -25,4 +25,14 @@ export const ENV = {
   // Shared secret that protects the manual notification trigger
   // (POST /api/internal/run-reminders). When empty, the endpoint is disabled.
   INTERNAL_TRIGGER_SECRET: process.env.INTERNAL_TRIGGER_SECRET || '',
+  // Absolute origin this service is reachable at, used to build public asset
+  // URLs that leave the building — currently the Pip artwork attached to push
+  // notifications, which the phone's OS fetches for itself and therefore cannot
+  // be given a relative path. Railway injects RAILWAY_PUBLIC_DOMAIN, so this
+  // needs no manual configuration in production. Empty locally, which makes
+  // getPipImageUrl() return null and pushes fall back to text-only.
+  PUBLIC_BASE_URL: (
+    process.env.PUBLIC_BASE_URL ||
+    (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')
+  ).replace(/\/+$/, ''),
 };

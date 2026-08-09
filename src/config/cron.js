@@ -10,6 +10,7 @@ import {
     usersTable,
 } from "../db/schema.js";
 import { resolveCalorieZone } from "../services/calorieTargetBand.js";
+import { getPipImageUrl } from "../services/pipNotificationImage.js";
 import {
     cleanupOldNotifications,
     sendNotificationToUser,
@@ -70,6 +71,14 @@ const SUMMARY_HOUR = 21;
 // slot, which leaves exactly one meal skip-check — the first that comes due.
 // Someone skipping all three meals hears about it once, not three times.
 const MAX_MEAL_NUDGES_PER_DAY = 1;
+
+// Which Pip the summary wears, per band. "over" gets Confident rather than
+// anything disapproving — the locked rule is that Pip never scolds.
+const SUMMARY_PIP_STATE = {
+    on_target: "happy",
+    over: "confident",
+    under: "care",
+};
 
 // End-of-day copy, keyed by the tolerance band in services/calorieTargetBand.js.
 // Pip never scolds: "over" is reassurance, not a telling-off.
@@ -201,12 +210,22 @@ const getLoggedMealTypesForDay = async (userId, localDate) => {
     return new Set(rows.map((row) => String(row.mealType || "").trim().toLowerCase()));
 };
 
+// A skipped meal is Pip's sad state — the same one the home card shows for a
+// fresh miss, so the notification and the app agree on the bird.
+const SKIP_CHECK_PIP_STATE = "sad";
+
 const sendMealSkipCheckToUser = async ({ userId, reminderType, title, body }) => {
     const result = await sendNotificationToUser({
         userId,
         title,
         body,
-        data: { type: `${reminderType}_reminder`, mealType: reminderType, screen: "/(tabs)/meal/summary" },
+        data: {
+            type: `${reminderType}_reminder`,
+            mealType: reminderType,
+            pip: SKIP_CHECK_PIP_STATE,
+            screen: "/(tabs)/meal/summary",
+        },
+        imageUrl: getPipImageUrl(SKIP_CHECK_PIP_STATE),
     });
     return result?.sent ?? 0;
 };
@@ -237,6 +256,7 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
     const copy = SUMMARY_COPY[zone];
     const title = copy.title;
     const body = copy.body(Math.round(consumed).toLocaleString("en-US"), Math.round(target).toLocaleString("en-US"));
+    const pip = SUMMARY_PIP_STATE[zone];
 
     const result = await sendNotificationToUser({
         userId,
@@ -246,9 +266,10 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
             type: "daily_summary",
             date: localDate,
             zone,
-            pip: zone === "on_target" ? "happy" : zone === "over" ? "confident" : "care",
+            pip,
             screen: "/(tabs)/profile/notifications",
         },
+        imageUrl: getPipImageUrl(pip),
     });
     return { eligible: true, sent: result?.sent ?? 0 };
 };

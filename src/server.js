@@ -181,6 +181,20 @@ app.use('/ingredients', express.static(ingredientImagesDir, {
   },
 }));
 
+// Serve the Pip mascot stills used as push-notification artwork. Same shape as
+// /ingredients above, and public for the same reason plus one more: the client
+// here is the phone's OS (or, on iOS, the Notification Service Extension), which
+// fetches the URL out of the push payload with no Clerk session to present.
+// Filenames are stable and the art is versionless, so cache for a year.
+const pipImagesDir = path.resolve(currentDirPath, '../public/pip');
+app.use('/pip', express.static(pipImagesDir, {
+  maxAge: '365d',
+  immutable: true,
+  setHeaders: (res) => {
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  },
+}));
+
 // Mirror the health response on a generic path used by some hosting probes.
 app.get('/health', (req, res) => {
   warmFatSecretCacheInBackground('health');
