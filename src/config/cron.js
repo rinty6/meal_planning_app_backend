@@ -215,6 +215,7 @@ const getLoggedMealTypesForDay = async (userId, localDate) => {
 const SKIP_CHECK_PIP_STATE = "sad";
 
 const sendMealSkipCheckToUser = async ({ userId, reminderType, title, body }) => {
+    const imageUrl = getPipImageUrl(SKIP_CHECK_PIP_STATE);
     const result = await sendNotificationToUser({
         userId,
         title,
@@ -223,9 +224,12 @@ const sendMealSkipCheckToUser = async ({ userId, reminderType, title, body }) =>
             type: `${reminderType}_reminder`,
             mealType: reminderType,
             pip: SKIP_CHECK_PIP_STATE,
+            // Duplicated from the richContent field on purpose — see the note on
+            // pipImage in sendDailySummaryToUser().
+            pipImage: imageUrl,
             screen: "/(tabs)/meal/summary",
         },
-        imageUrl: getPipImageUrl(SKIP_CHECK_PIP_STATE),
+        imageUrl,
     });
     return result?.sent ?? 0;
 };
@@ -257,6 +261,7 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
     const title = copy.title;
     const body = copy.body(Math.round(consumed).toLocaleString("en-US"), Math.round(target).toLocaleString("en-US"));
     const pip = SUMMARY_PIP_STATE[zone];
+    const imageUrl = getPipImageUrl(pip);
 
     const result = await sendNotificationToUser({
         userId,
@@ -267,9 +272,17 @@ const sendDailySummaryToUser = async ({ userId, localDate }) => {
             date: localDate,
             zone,
             pip,
+            // The same URL rides in BOTH richContent (via imageUrl below) and here
+            // in data. richContent is how Expo's own Android renderer finds the
+            // image, but how Expo maps that field into the iOS APNs payload is
+            // undocumented — so the iOS Notification Service Extension would be
+            // guessing where to look. `data` is ours and always arrives intact in
+            // userInfo, so the extension reads pipImage from there instead of
+            // depending on Expo's internal shape.
+            pipImage: imageUrl,
             screen: "/(tabs)/profile/notifications",
         },
-        imageUrl: getPipImageUrl(pip),
+        imageUrl,
     });
     return { eligible: true, sent: result?.sent ?? 0 };
 };
