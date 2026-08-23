@@ -1,3 +1,5 @@
 .env
 
 node_modules
+
+src/db/migrations_archive_*/

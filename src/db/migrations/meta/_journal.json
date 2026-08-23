@@ -5,50 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1765798181965,
-      "tag": "0000_curved_black_bird",
+      "when": 1787464861722,
+      "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1767436460369,
-      "tag": "0001_silky_valeria_richards",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1770032981059,
-      "tag": "0002_certain_annihilus",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1770205590563,
-      "tag": "0003_short_reaper",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1772052000000,
-      "tag": "0004_blue_notification_mesh",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1772800000000,
-      "tag": "0005_candid_feedback_signal",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1775923200000,
-      "tag": "0007_recommendation_feedback_user_created_at_idx",
+      "when": 1787465154002,
+      "tag": "0001_catalog_brands",
       "breakpoints": true
     }
   ]
