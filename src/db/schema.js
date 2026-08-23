@@ -1,4 +1,5 @@
 // This file will create relational tables in the database using Drizzle ORM
+// This schema is used to stored all users history.
 import { pgTable, serial, text, timestamp, integer, pgEnum, real, date, json, jsonb, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core';
 
 // 1. Define Enums (Strict lists of options)
