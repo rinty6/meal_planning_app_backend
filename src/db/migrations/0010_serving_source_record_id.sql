@@ -1,0 +1,2 @@
+ALTER TABLE "catalog_food_servings" ADD COLUMN "source_record_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "catalog_food_servings_source_record_unique" ON "catalog_food_servings" USING btree ("food_id","source_record_id");

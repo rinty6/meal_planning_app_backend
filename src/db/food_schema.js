@@ -200,6 +200,13 @@ export const catalogFoodServingsTable = pgTable('catalog_food_servings', {
   numberOfUnits: numeric('number_of_units', { precision: 12, scale: 4, mode: 'number' }).notNull(),
   measurementDescription: text('measurement_description').notNull(),
 
+  // The source's own id for this serving (AUSNUT's Measure ID, globally unique
+  // across its 9,816 rows). Without it a re-import cannot match existing rows
+  // and has to delete-and-reinsert, churning ids. Nullable: servings we
+  // synthesise ourselves (the 100 g default for a food AUSNUT gives no measure
+  // for) have no upstream id.
+  sourceRecordId: text('source_record_id'),
+
   metricAmount: numeric('metric_amount', { precision: 12, scale: 4, mode: 'number' }),
   metricUnit: text('metric_unit'),
   gramsEquivalent: numeric('grams_equivalent', { precision: 12, scale: 4, mode: 'number' }),
@@ -221,6 +228,12 @@ export const catalogFoodServingsTable = pgTable('catalog_food_servings', {
   // Target for the composite FK on recipe_ingredients, which stops an
   // ingredient pointing at ANOTHER food's serving row.
   idFoodUnique: uniqueIndex('catalog_food_servings_id_food_unique').on(table.id, table.foodId),
+
+  // Scoped to the food, not global: a food belongs to one source, so this stays
+  // safe once USDA and OFF servings land alongside AUSNUT's. Postgres treats
+  // NULLs as distinct, so synthesised servings never collide here.
+  sourceRecordUnique: uniqueIndex('catalog_food_servings_source_record_unique')
+    .on(table.foodId, table.sourceRecordId),
 
   metricUnitCheck: check('catalog_food_servings_metric_unit_check',
     sql`${table.metricUnit} IS NULL OR ${table.metricUnit} IN ('g','ml','oz')`),

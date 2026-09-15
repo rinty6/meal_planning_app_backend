@@ -6,8 +6,10 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test": "node --test src/services/dailyCalorieTarget.test.js",
-    "db:push": "drizzle-kit push --config=drizzle.config.js",
-    "users:inspect": "node scripts/inspect-user-record.js"
+    "db:generate": "drizzle-kit generate --config=drizzle.config.js",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.js",
+    "db:check": "drizzle-kit check --config=drizzle.config.js",
+    "db:push": "drizzle-kit push --config=drizzle.config.js"
   },
   "keywords": [],
   "type": "module",
