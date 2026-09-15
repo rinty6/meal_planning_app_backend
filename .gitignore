@@ -3,3 +3,5 @@
 node_modules
 
 src/db/migrations_archive_*/
+# Importer stage outputs: regenerable JSON, ~1 MB, produced by resolve/compute
+importers/**/out/
