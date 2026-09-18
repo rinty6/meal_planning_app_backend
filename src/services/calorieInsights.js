@@ -1,6 +1,7 @@
 // Historical insights reuse the canonical target resolver for every date in the
 // analysis window, keeping adherence calculations aligned with the daily dashboard.
 import { resolveDailyCalorieTarget } from "./dailyCalorieTarget.js";
+import { formatEnergyKj } from "../utils/energy.js";
 
 const WEEKDAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
@@ -321,7 +322,7 @@ const buildWeekdayInsight = ({ dailyBreakdown, mealCount }) => {
     lowestWeekday,
     averages,
     trend: topWeekday.averageCalories >= lowestWeekday.averageCalories * 1.2 ? "attention" : "neutral",
-    summary: `${topWeekday.day} is your highest-calorie day on average at about ${topWeekday.averageCalories} kcal.`,
+    summary: `${topWeekday.day} is your highest-energy day on average at about ${formatEnergyKj(topWeekday.averageCalories)}.`,
     detail: `This is based on weekday averages, not raw totals, across ${loggedDays.length} logged days.`,
   };
 };
@@ -371,7 +372,7 @@ const buildMealPatternInsight = ({ meals, mealCount, loggedDays }) => {
     peakMealType,
     averages,
     trend: peakMealType.averageCalories >= 700 ? "attention" : "neutral",
-    summary: `${mealTypeLabel} is your largest meal slot on average at about ${peakMealType.averageCalories} kcal.`,
+    summary: `${mealTypeLabel} is your largest meal slot on average at about ${formatEnergyKj(peakMealType.averageCalories)}.`,
     detail: "We compare total calories per meal slot per day rather than relying on log timestamps.",
   };
 };

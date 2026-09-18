@@ -1,6 +1,7 @@
 import cron from "cron";
 import dotenv from "dotenv";
 import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { formatEnergyKj } from "../utils/energy.js";
 import { db } from "./db.js";
 import {
     calorieGoalsTable,
@@ -86,7 +87,7 @@ const SUMMARY_COPY = {
     on_target: {
         title: "Nailed it, mate!",
         body: (consumed, target) =>
-            `${consumed} kcal against your ${target} kcal target. That’s the day done right.`,
+            `${formatEnergyKj(consumed)} against your ${formatEnergyKj(target)} target. That’s the day done right.`,
     },
     under: {
         title: "No dramas, mate!",

@@ -11,6 +11,7 @@ import { getCalorieTargetBand, resolveCalorieZone } from "../services/calorieTar
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
+import { formatEnergyKj } from "../utils/energy.js";
 
 const mealRoutes = express.Router();
 
@@ -112,7 +113,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       void sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
-        body: `Nice work — you're on target for today, around your ${target} kcal goal.`,
+        body: `Nice work — you're on target for today, around your ${formatEnergyKj(target)} goal.`,
         data: { screen: "/(tabs)/profile/notifications", type: "goal_achieved" },
       }).catch((error) => {
         console.error("goal_achieved push failed (meal add):", error);
@@ -198,7 +199,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
       void sendNotificationToUser({
         userId: user.userId,
         title: "Daily Goal Achieved!",
-        body: `Nice work — you're on target for today, around your ${target} kcal goal.`,
+        body: `Nice work — you're on target for today, around your ${formatEnergyKj(target)} goal.`,
         data: { screen: "/(tabs)/profile/notifications", type: "goal_achieved" },
       }).catch((error) => {
         console.error("goal_achieved push failed (batch add):", error);
