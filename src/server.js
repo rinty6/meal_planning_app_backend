@@ -10,6 +10,7 @@ import {
   recommendationLimiter,
   fatSecretLimiter,
   theMealDbLimiter,
+  catalogLimiter,
   cachedContentLimiter,
   foodRecognitionLimiter,
   primeLimiter,
@@ -24,6 +25,7 @@ import shoppingRoutes from './routes/shopping.js';
 import calorieRoutes from './routes/calorie.js';
 import recommendationRoutes from './routes/recommendation.js';
 import fatSecretRoutes, { canServeFatSecretRequestFromCache } from './routes/fatsecret.js';
+import catalogRoutes, { canServeCatalogRequestFromCache } from './routes/catalog.js';
 import mealPlanRoutes, { ensureMealPlanStorage } from './routes/mealPlan.js';
 import {
   ensureRecommendationFeedbackStorage,
@@ -246,6 +248,10 @@ app.use('/api/themealdb', (req, res, next) =>
   canServeTheMealDbRequestFromCache(req)
     ? tagBucket('cached', cachedContentLimiter)(req, res, next)
     : tagBucket('themealdb', theMealDbLimiter)(req, res, next));
+app.use('/api/catalog', (req, res, next) =>
+  canServeCatalogRequestFromCache(req)
+    ? tagBucket('cached', cachedContentLimiter)(req, res, next)
+    : tagBucket('catalog', catalogLimiter)(req, res, next));
 app.use('/api/food-recognition', tagBucket('foodrecog', foodRecognitionLimiter));
 app.use('/api/meal-plan', tagBucket('recommend', recommendationLimiter));
 app.use('/api/prime', tagBucket('prime', primeLimiter));
@@ -291,6 +297,7 @@ app.use('/api/calorie', calorieRoutes);
 app.use('/api/recommendation', recommendationRoutes);
 app.use('/api/fatsecret', fatSecretRoutes);
 app.use('/api/themealdb', themealdbRoutes);
+app.use('/api/catalog', catalogRoutes);
 app.use('/api/food-recognition', foodRecognitionRoutes);
 app.use('/api/meal-plan', mealPlanRoutes);
 app.use('/api/profile', profileRoutes);

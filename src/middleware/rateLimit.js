@@ -40,6 +40,7 @@ const DEDICATED_BUCKET_PREFIXES = [
   "/recommendation",
   "/fatsecret",
   "/themealdb",
+  "/catalog",
   "/food-recognition",
   "/meal-plan",
   "/prime",
@@ -104,6 +105,18 @@ export const theMealDbLimiter = buildLimiter({
   windowMs: 60_000,
   max: toPositiveInt(process.env.RATE_LIMIT_THEMEALDB_MAX, 120), // default raised 60 -> 120, same reasoning as fatSecretLimiter
   message: "Too many recipe lookup requests. Please wait a moment and try again.",
+});
+
+// Self-owned catalogue search (/api/catalog, routes/catalog.js). A miss costs
+// one Neon query (20-140 ms measured 2026-09-18), no third-party quota, so
+// this is looser than fatSecretLimiter and exists as flood protection for the
+// database. Cache hits are routed to cachedContentLimiter by the probe in
+// server.js and never spend this bucket. Own instance, never shared with
+// another route tree (ERROR_LOG 063).
+export const catalogLimiter = buildLimiter({
+  windowMs: 60_000,
+  max: toPositiveInt(process.env.RATE_LIMIT_CATALOG_MAX, 240),
+  message: "Too many food searches. Please wait a moment and try again.",
 });
 
 // Requests the backend can already answer from its own in-memory caches (see
