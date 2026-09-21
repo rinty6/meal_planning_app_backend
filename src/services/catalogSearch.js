@@ -18,10 +18,21 @@
  *     word_similarity 1.0 so `<%` catches it, and ORing an unindexed equality
  *     onto an indexed operator forces the seq scan straight back.
  *   - ORDER BY tiers: word-set containment (lets "olive oil" reach AUSNUT's
- *     inverted "Oil, olive") → source_derivation quality (a lab-analysed
- *     AUSNUT generic beats a crowdsourced label of the same name) →
- *     base_name = q → word_similarity → household serving (p1-02, see below)
- *     → fewer words → fewer segments → shorter name.
+ *     inverted "Oil, olive") → generic before branded → source_derivation
+ *     quality → base_name = q → word_similarity → household serving (p1-02,
+ *     see below) → fewer words → fewer segments → shorter name.
+ *
+ * Generic-before-branded (device pass 2026-09-21): the first port ranked
+ * source_derivation straight after containment, meaning to say "a lab-analysed
+ * AUSNUT generic beats a crowdsourced label of the same name". But that scale
+ * only orders AUSNUT rows among themselves (analysed > recipe > imputed >
+ * borrowed > estimated), while every Open Food Facts row is 'label_data',
+ * which sits ABOVE 'recipe'. 2,001 of the 3,741 AUSNUT generics are recipe-
+ * derived (every cooked variant: fried egg, boiled rice, roast chicken), so
+ * "fried egg" opened with seven Egg Fried Rice labels and the actual fried
+ * egg sat at rank 8. The reference food is the generic; branded products are
+ * variants of it and have their own refine chip. source_derivation now breaks
+ * ties inside the generic tier, which is the only comparison it was built for.
  *
  * Within-group tiebreak (checklist p1-02, added 2026-09-18): the experiment
  * asserted only the top hit's base_name, so the order INSIDE a group was
@@ -253,6 +264,7 @@ export const buildSearchSql = ({ query, segments, source, limit, offset }) => {
         row_number() over (
           order by
             ((select words from query_words) <@ c.name_words) desc,
+            (c.food_type = 'generic') desc,
             case c.source_derivation
               when 'analysed'   then 1
               when 'label_data' then 2

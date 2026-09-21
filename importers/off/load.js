@@ -14,6 +14,11 @@
  *
  * Idempotent: brands upsert on normalized_name, foods on
  * (source_name, source_record_id), servings on (food_id, source_record_id).
+ *
+ * Display casing (2026-09-21): names and brands pass through displayCase.js
+ * before they are written, so "CHICKEN, LETTUCE & AVOCADO" lands as "Chicken,
+ * Lettuce & Avocado". Rows loaded before that date were backfilled once with
+ * importers/off/recase.js, which applies the identical function.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -24,6 +29,7 @@ import { drizzle } from 'drizzle-orm/neon-serverless';
 import { inArray, sql } from 'drizzle-orm';
 
 import { ENV } from '../../src/config/env.js';
+import { recasePayload } from './displayCase.js';
 import {
   catalogBrandsTable,
   catalogFoodsTable,
@@ -275,10 +281,12 @@ async function main() {
     if (!meta[k]) throw new Error(`off_au.json is missing "${k}" - regenerate it with extract.py`);
   }
 
-  const foods = payload.foods.slice(0, limit);
+  // Vocabulary needs the WHOLE payload, so recase before --limit slices it.
+  const recased = recasePayload(payload);
+  const foods = recased.foods.slice(0, limit);
   // Only the brands this run actually references, so --limit stays cheap.
   const referenced = new Set(foods.flatMap((f) => f.brands.map((b) => b.toLowerCase())));
-  const brands = payload.brands.filter((b) => referenced.has(b.normalized_name));
+  const brands = recased.brands.filter((b) => referenced.has(b.normalized_name));
 
   console.log(`Loading ${foods.length.toLocaleString()} products from ${path.basename(JSON_PATH)}`);
   console.log(`  generated ${payload.generated_at}`);
