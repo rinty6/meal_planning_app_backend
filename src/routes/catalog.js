@@ -5,6 +5,7 @@
  * one consumer at a time; that file stays until its last importer is gone.
  *
  *   GET /foods/search?q=&segment=&segment=&source=&limit=&offset=
+ *   GET /foods/barcode/:code
  *
  * Auth: requireClerkAuth on every route (decided 2026-09-18, checklist p0-07):
  * the app is login-only, per-user identity makes the rate bucket fair under
@@ -28,6 +29,11 @@ import express from "express";
 
 import { requireClerkAuth } from "../middleware/auth.js";
 import {
+  hasCachedBarcodeLookup,
+  lookupBarcode,
+  parseBarcodeParams,
+} from "../services/catalogBarcode.js";
+import {
   hasCachedCatalogSearch,
   parseSearchParams,
   searchCatalogFoods,
@@ -50,12 +56,27 @@ const searchInputFromRequest = (req) => ({
   offset: req.query.offset,
 });
 
+// "/foods/barcode/9310072010816" -> "9310072010816"
+const BARCODE_PATH = /^\/foods\/barcode\/([^/]+)$/;
+
 /** Limiter probe, mounted in server.js. req.path is relative to /api/catalog. */
 export const canServeCatalogRequestFromCache = (req) => {
-  if (String(req.path || "") !== "/foods/search") return true; // 404s cheaply
-  const parsed = parseSearchParams(searchInputFromRequest(req));
-  if (!parsed.ok) return true; // handler 400s without touching the database
-  return hasCachedCatalogSearch(parsed.params);
+  const path = String(req.path || "");
+
+  if (path === "/foods/search") {
+    const parsed = parseSearchParams(searchInputFromRequest(req));
+    if (!parsed.ok) return true; // handler 400s without touching the database
+    return hasCachedCatalogSearch(parsed.params);
+  }
+
+  const barcode = path.match(BARCODE_PATH);
+  if (barcode) {
+    const parsed = parseBarcodeParams({ code: decodeURIComponent(barcode[1]) });
+    if (!parsed.ok) return true;
+    return hasCachedBarcodeLookup(parsed.params);
+  }
+
+  return true; // anything else 404s cheaply
 };
 
 // Neon/driver failures that mean "try again shortly", not "bad request".
@@ -84,6 +105,31 @@ catalogRoutes.get("/foods/search", requireClerkAuth, async (req, res) => {
       return res.status(503).json({ error: "Food catalogue is temporarily unavailable.", retryable: true });
     }
     return res.status(500).json({ error: "Food search failed.", retryable: false });
+  }
+});
+
+/**
+ * A barcode we do not hold is a 200 with found: false, NOT a 404 (checklist
+ * b1-07). The client maps a 404 to a failure kind, and the scanner would then
+ * show "something went wrong" where the label-report form belongs. Only a real
+ * failure gets a failure status here.
+ */
+catalogRoutes.get("/foods/barcode/:code", requireClerkAuth, async (req, res) => {
+  const parsed = parseBarcodeParams({ code: req.params.code });
+  if (!parsed.ok) {
+    return res.status(400).json({ error: parsed.error });
+  }
+
+  try {
+    const { cached, ...result } = await lookupBarcode(parsed.params);
+    res.set("Cache-Control", SEARCH_RESULT_CACHE_HEADER);
+    return res.status(200).json({ ...result, meta: { cached } });
+  } catch (error) {
+    console.error("Catalog barcode lookup route error:", error);
+    if (isDatabaseUnavailable(error)) {
+      return res.status(503).json({ error: "Food catalogue is temporarily unavailable.", retryable: true });
+    }
+    return res.status(500).json({ error: "Barcode lookup failed.", retryable: false });
   }
 });
 
