@@ -150,14 +150,27 @@ favoritesRoutes.post("/save-custom", requireClerkAuth, ensureClerkIdMatch("body"
   }
 });
 
-// 1B. UPLOAD RECIPE PHOTO (Used by the Recipe Detail Page's create/edit hero image)
+// Folders a client may target. An allowlist, not a free string: the folder is
+// how these images are found, reviewed and purged later, and an uploader that
+// can invent folders makes all three impossible. "barcode-reports" was added
+// 2026-09-23 for photos of a nutrition panel (barcode redesign, b2-06).
+const UPLOAD_FOLDERS = {
+  recipes: "goodhealthmate/recipes",
+  "barcode-reports": "goodhealthmate/barcode-reports",
+};
+
+// 1B. UPLOAD PHOTO (recipe hero image; nutrition panel on a barcode report)
 favoritesRoutes.post("/upload-image", requireClerkAuth, attachUserFromAuth, async (req, res) => {
   try {
     requireCloudinaryConfig();
     const dataUri = validateImageDataUri(req.body?.imageBase64);
+    const folder = UPLOAD_FOLDERS[String(req.body?.folder ?? "recipes")];
+    if (!folder) {
+      return res.status(400).json({ error: "Unknown upload folder." });
+    }
 
     const uploadResult = await cloudinary.uploader.upload(dataUri, {
-      folder: "goodhealthmate/recipes",
+      folder,
       resource_type: "image",
     });
 

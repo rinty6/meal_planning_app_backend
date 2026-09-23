@@ -10,6 +10,7 @@ import {
   recommendationLimiter,
   fatSecretLimiter,
   theMealDbLimiter,
+  barcodeReportLimiter,
   catalogLimiter,
   cachedContentLimiter,
   foodRecognitionLimiter,
@@ -25,7 +26,7 @@ import shoppingRoutes from './routes/shopping.js';
 import calorieRoutes from './routes/calorie.js';
 import recommendationRoutes from './routes/recommendation.js';
 import fatSecretRoutes, { canServeFatSecretRequestFromCache } from './routes/fatsecret.js';
-import catalogRoutes, { canServeCatalogRequestFromCache } from './routes/catalog.js';
+import catalogRoutes, { canServeCatalogRequestFromCache, isBarcodeReportRequest } from './routes/catalog.js';
 import mealPlanRoutes, { ensureMealPlanStorage } from './routes/mealPlan.js';
 import {
   ensureRecommendationFeedbackStorage,
@@ -248,10 +249,16 @@ app.use('/api/themealdb', (req, res, next) =>
   canServeTheMealDbRequestFromCache(req)
     ? tagBucket('cached', cachedContentLimiter)(req, res, next)
     : tagBucket('themealdb', theMealDbLimiter)(req, res, next));
-app.use('/api/catalog', (req, res, next) =>
-  canServeCatalogRequestFromCache(req)
+app.use('/api/catalog', (req, res, next) => {
+  // A report is a write that also sends an email, so it is metered on its own
+  // bucket rather than the read-side one (ERROR_LOG 063: never share).
+  if (isBarcodeReportRequest(req)) {
+    return tagBucket('barcodereport', barcodeReportLimiter)(req, res, next);
+  }
+  return canServeCatalogRequestFromCache(req)
     ? tagBucket('cached', cachedContentLimiter)(req, res, next)
-    : tagBucket('catalog', catalogLimiter)(req, res, next));
+    : tagBucket('catalog', catalogLimiter)(req, res, next);
+});
 app.use('/api/food-recognition', tagBucket('foodrecog', foodRecognitionLimiter));
 app.use('/api/meal-plan', tagBucket('recommend', recommendationLimiter));
 app.use('/api/prime', tagBucket('prime', primeLimiter));

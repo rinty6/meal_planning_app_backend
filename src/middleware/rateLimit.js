@@ -119,6 +119,18 @@ export const catalogLimiter = buildLimiter({
   message: "Too many food searches. Please wait a moment and try again.",
 });
 
+// Label reports from the barcode scanner. A write, and one that sends an
+// email, so it is metered far tighter than the read next door: a person meets
+// a handful of unknown packs in a shop, not hundreds. Own instance, never
+// shared with catalogLimiter (ERROR_LOG 063) — a burst of reports must not be
+// able to lock the user out of scanning, and a burst of scanning must not
+// stop them reporting.
+export const barcodeReportLimiter = buildLimiter({
+  windowMs: 60 * 60_000,
+  max: toPositiveInt(process.env.RATE_LIMIT_REPORTS_MAX, 20),
+  message: "Thanks for the reports. Please send the rest in a little while.",
+});
+
 // Requests the backend can already answer from its own in-memory caches (see
 // canServeFatSecretRequestFromCache / canServeTheMealDbRequestFromCache).
 // These spend no third-party quota and ~0ms of compute, so they get a ceiling

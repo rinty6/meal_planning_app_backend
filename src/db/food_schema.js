@@ -541,3 +541,67 @@ export const recipeAttributesTable = pgTable('recipe_attributes', {
     sql`${table.presence} IS NULL OR ${table.presence} IN ('contains','may_contain','free')`),
   attributeIdIdx: index('recipe_attributes_attribute_id_idx').on(table.attributeId),
 }));
+/**
+ * Label reports from the barcode scanner: what a user typed off a pack we do
+ * not hold (barcode redesign, checklist b2-01). This is the only table in the
+ * catalogue written by the app rather than by an importer, so it is kept
+ * deliberately separate from catalog_foods: a report is a CLAIM, and it is
+ * reviewed before any of it reaches the catalogue.
+ *
+ * One row per (barcode, reporter): a second send from the same person for the
+ * same pack corrects their first, it does not pile up. Two different people
+ * reporting the same barcode DO make two rows, which is the point — agreement
+ * between strangers is the strongest signal we get that the numbers are right.
+ *
+ * Energy is stored as the user typed it, in kJ, because that is what the
+ * Australian label prints and what they read off the pack. Converting at write
+ * time would hide a typo behind a rounding.
+ */
+export const catalogBarcodeReportsTable = pgTable('catalog_barcode_reports', {
+  id: bigint('id', { mode: 'number' }).generatedAlwaysAsIdentity().primaryKey(),
+  barcode: text('barcode').notNull(),
+  barcodeType: text('barcode_type'),
+
+  // What the pack says. Name, serving size and energy are required by the form.
+  productName: text('product_name').notNull(),
+  brand: text('brand'),
+  servingSize: numeric('serving_size', { precision: 10, scale: 2 }).notNull(),
+  servingUnit: text('serving_unit').default('g').notNull(),
+  energyKj: numeric('energy_kj', { precision: 10, scale: 2 }).notNull(),
+  proteinG: numeric('protein_g', { precision: 10, scale: 2 }),
+  carbohydrateG: numeric('carbohydrate_g', { precision: 10, scale: 2 }),
+  fatG: numeric('fat_g', { precision: 10, scale: 2 }),
+
+  // Optional photo of the nutrition panel, through the existing upload path.
+  // It is what makes a report verifiable rather than merely plausible.
+  photoUrl: text('photo_url'),
+
+  reportedBy: text('reported_by').notNull(),
+  appVersion: text('app_version'),
+
+  // new -> checked -> added | rejected. Nothing here is trusted until a human
+  // has compared it with the photo or the pack.
+  status: text('status').default('new').notNull(),
+  reviewNote: text('review_note'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  reporterBarcodeUnique: uniqueIndex('catalog_barcode_reports_reporter_unique')
+    .on(table.barcode, table.reportedBy),
+  // The review queue reads "everything new, oldest first" and "everything for
+  // this barcode", so both get an index.
+  statusCreatedIdx: index('catalog_barcode_reports_status_created_idx')
+    .on(table.status, table.createdAt),
+  barcodeIdx: index('catalog_barcode_reports_barcode_idx').on(table.barcode),
+  statusCheck: check('catalog_barcode_reports_status_check',
+    sql`${table.status} IN ('new','checked','added','rejected')`),
+  servingUnitCheck: check('catalog_barcode_reports_serving_unit_check',
+    sql`${table.servingUnit} IN ('g','ml')`),
+  // Cheap guards at the storage layer as well as in the service: a value that
+  // cannot be true should not be storable, whatever calls the insert.
+  servingSizeCheck: check('catalog_barcode_reports_serving_size_check',
+    sql`${table.servingSize} > 0 AND ${table.servingSize} <= 5000`),
+  energyCheck: check('catalog_barcode_reports_energy_check',
+    sql`${table.energyKj} >= 0 AND ${table.energyKj} <= 20000`),
+}));

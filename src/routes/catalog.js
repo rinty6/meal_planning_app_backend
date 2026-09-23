@@ -6,6 +6,7 @@
  *
  *   GET /foods/search?q=&segment=&segment=&source=&limit=&offset=
  *   GET /foods/barcode/:code
+ *   POST /barcode/reports
  *
  * Auth: requireClerkAuth on every route (decided 2026-09-18, checklist p0-07):
  * the app is login-only, per-user identity makes the rate bucket fair under
@@ -33,6 +34,7 @@ import {
   lookupBarcode,
   parseBarcodeParams,
 } from "../services/catalogBarcode.js";
+import { parseReport, submitReport } from "../services/barcodeReports.js";
 import {
   hasCachedCatalogSearch,
   parseSearchParams,
@@ -58,6 +60,15 @@ const searchInputFromRequest = (req) => ({
 
 // "/foods/barcode/9310072010816" -> "9310072010816"
 const BARCODE_PATH = /^\/foods\/barcode\/([^/]+)$/;
+const REPORTS_PATH = "/barcode/reports";
+
+/**
+ * Report submissions get their own bucket in server.js rather than the
+ * read-side catalogue one: this is a write that also sends an email, and the
+ * two must not be able to starve each other (ERROR_LOG 063).
+ */
+export const isBarcodeReportRequest = (req) =>
+  String(req.method || "").toUpperCase() === "POST" && String(req.path || "") === REPORTS_PATH;
 
 /** Limiter probe, mounted in server.js. req.path is relative to /api/catalog. */
 export const canServeCatalogRequestFromCache = (req) => {
@@ -130,6 +141,41 @@ catalogRoutes.get("/foods/barcode/:code", requireClerkAuth, async (req, res) => 
       return res.status(503).json({ error: "Food catalogue is temporarily unavailable.", retryable: true });
     }
     return res.status(500).json({ error: "Barcode lookup failed.", retryable: false });
+  }
+});
+
+/**
+ * A label report: what a user typed off a pack we do not hold.
+ *
+ * 201 on a first report, 200 when it corrects one they already sent. The
+ * client ignores both and ignores every failure here too: their food is
+ * already in their meal log by the time this runs, and a problem with our
+ * inbox is not theirs to solve (checklist b0-09). We still answer honestly so
+ * the failure is visible in logs and in tests.
+ */
+catalogRoutes.post("/barcode/reports", requireClerkAuth, async (req, res) => {
+  // requireClerkAuth sets req.auth.clerkId (verified token, or the dev
+  // fallback). Never read the reporter from the body: it is the one field a
+  // client must not be able to choose for itself.
+  const reportedBy = req.auth?.clerkId;
+  const parsed = parseReport(req.body, { reportedBy });
+  if (!parsed.ok) {
+    return res.status(400).json({ error: parsed.error });
+  }
+
+  try {
+    const { report, created, notified } = await submitReport(parsed.report);
+    return res.status(created ? 201 : 200).json({
+      report: { id: report.id, barcode: report.barcode, status: report.status },
+      created,
+      notified,
+    });
+  } catch (error) {
+    console.error("Barcode report route error:", error);
+    if (isDatabaseUnavailable(error)) {
+      return res.status(503).json({ error: "Could not save that report right now.", retryable: true });
+    }
+    return res.status(500).json({ error: "Could not save that report.", retryable: false });
   }
 });
 
