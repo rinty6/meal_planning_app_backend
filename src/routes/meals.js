@@ -89,6 +89,11 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
 
     const newTotalCalories = meals.reduce((sum, m) => sum + toNumber(m.calories), 0);
     const previousTotalCalories = Math.max(0, newTotalCalories - toNumber(calories));
+    // The meal's own subtotal, for the day bar on the confirmation card. Free:
+    // the rows are already here for the target zone above.
+    const mealTotalCalories = meals
+      .filter((m) => String(m.mealType).toLowerCase() === String(mealType).toLowerCase())
+      .reduce((sum, m) => sum + toNumber(m.calories), 0);
 
     // Tolerance band, not an exact hit — see services/calorieTargetBand.js and
     // ERROR_LOG Error 074. `reachedTarget` is edge-triggered on ENTERING the band
@@ -132,6 +137,7 @@ mealRoutes.post("/add", requireClerkAuth, ensureClerkIdMatch("body"), attachUser
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
       dailyTargetSource: targetContext.source,
+      mealTotalCalories: Math.round(mealTotalCalories),
       meal,
     });
   } catch (error) {
@@ -186,6 +192,13 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
     const newTotalCalories = meals.reduce((sum, m) => sum + toNumber(m.calories), 0);
     const previousTotalCalories = Math.max(0, newTotalCalories - addedCalories);
 
+    // The meal's own subtotal, for the day bar on the confirmation card. This
+    // route takes ONE mealType for the whole batch, so there is always exactly
+    // one meal to total.
+    const mealTotalCalories = meals
+      .filter((m) => String(m.mealType).toLowerCase() === String(mealType).toLowerCase())
+      .reduce((sum, m) => sum + toNumber(m.calories), 0);
+
     // Same tolerance band as the single-add route above.
     const targetZone = resolveCalorieZone(newTotalCalories, target);
     const previousZone = resolveCalorieZone(previousTotalCalories, target);
@@ -217,6 +230,7 @@ mealRoutes.post("/add-batch", requireClerkAuth, ensureClerkIdMatch("body"), atta
       dailyTotalCalories: Math.round(newTotalCalories),
       dailyTarget: target,
       dailyTargetSource: targetContext.source,
+      mealTotalCalories: Math.round(mealTotalCalories),
       addedCount: mealRows.length,
     });
   } catch (error) {
