@@ -5,6 +5,12 @@ import { pgTable, serial, text, timestamp, integer, pgEnum, real, date, json, js
 // 1. Define Enums (Strict lists of options)
 // This list is created to store the activity level of each user after sign up process
 export const activityLevelEnum = pgEnum('activity_level', [
+  // 'sedentary' was offered by the profile edit screen and was NOT in this
+  // enum, so Postgres rejected the write and the choice could not be saved
+  // at all. Found 2026-11-13. The Australian Dietary Guidelines' own serve
+  // table is built for "sedentary to moderate" activity, so the level has to
+  // exist. Added FIRST so the list reads in ascending order.
+  'sedentary',
   'lightly_active', 
   'moderately_active', 
   'very_active', 
@@ -140,7 +146,28 @@ export const demographicsTable = pgTable('demographics', {
   gender: genderEnum('gender'),
   dateOfBirth: date('date_of_birth'), // Store DOB, calculate age in the app
   activityLevel: activityLevelEnum('activity_level'),
-  goal: goalEnum('goal'), 
+  goal: goalEnum('goal'),
+
+  // Pregnancy and breastfeeding. Design: claude_memory/database redesign/
+  // meal planning redesign/ONBOARDING_PREGNANCY_DESIGN.html
+  //
+  // Two things depend on these and neither is optional: the Australian
+  // Dietary Guidelines have separate pregnant and lactating serve rows (a
+  // lactating woman is advised 9 grain and 7.5 vegetable serves against 6
+  // and 5), and NHMRC alcohol Guideline 3 is absolute for both.
+  //
+  // Three states, on purpose:
+  //   NULL   not stated: skipped the step, or never shown it (male)
+  //   false  answered, and it does not apply
+  //   true   answered, and it applies
+  // NULL and false give the same targets today. They are kept apart so the
+  // app can tell "never asked" from "asked and said no" if it ever re-asks.
+  //
+  // Forced to NULL for a male user by both save routes, not just hidden in
+  // the app, so a stale answer can never be stored against the wrong person.
+  isPregnant: boolean('is_pregnant'),
+  isBreastfeeding: boolean('is_breastfeeding'),
+
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 

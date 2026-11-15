@@ -3,6 +3,7 @@ import { db } from "../config/db.js";
 import { eq } from "drizzle-orm";
 import { demographicsTable } from "../db/schema.js";
 import { attachUserFromAuth, requireClerkAuth } from "../middleware/auth.js";
+import { isValidActivityLevel, resolvePregnancyFields } from "../services/demographicsRules.js";
 
 // This file will help store all user's background details
 // I will these when building machine learning model and meal generating model;
@@ -24,12 +25,23 @@ demographicsRoutes.post("/save", requireClerkAuth, attachUserFromAuth, async (re
             goal,
             weightUnit,
             heightUnit,
+            isPregnant,
+            isBreastfeeding,
         } = req.body;
 
         if (!age || !gender || !weight || !height || !activityLevel || !goal) {
             return res.status(400).json({
                 error: "Missing required onboarding fields.",
                 code: "INVALID_DEMOGRAPHICS_PAYLOAD",
+            });
+        }
+
+        // Without this, a value outside the activity_level enum reached the
+        // database and came back as a 500. It is the client's mistake, so 400.
+        if (!isValidActivityLevel(activityLevel)) {
+            return res.status(400).json({
+                error: "Unrecognised activity level.",
+                code: "INVALID_ACTIVITY_LEVEL",
             });
         }
 
@@ -56,9 +68,22 @@ demographicsRoutes.post("/save", requireClerkAuth, attachUserFromAuth, async (re
         const birthYear = currentYear - parsedAge;
         const approxDob = new Date(`${birthYear}-01-01`);
 
+        const normalizedGender = String(gender).toLowerCase();
+
+        // Onboarding is the whole profile in one go, so a field the step did
+        // not send (skipped, or never shown to a male user) is stored as NULL,
+        // "not stated". That also matters for the upsert below: re-running
+        // onboarding as Male clears any answers from an earlier run.
+        const pregnancy = resolvePregnancyFields({
+            gender: normalizedGender,
+            isPregnant,
+            isBreastfeeding,
+            skippedMeansNull: true,
+        });
+
         const demographicsPayload = {
             userId,
-            gender: String(gender).toLowerCase(),
+            gender: normalizedGender,
             dateOfBirth: approxDob,
             weight: parsedWeight,
             height: parsedHeight,
@@ -66,6 +91,8 @@ demographicsRoutes.post("/save", requireClerkAuth, attachUserFromAuth, async (re
             preferredHeightUnit: heightUnit,
             activityLevel,
             goal,
+            isPregnant: pregnancy.isPregnant,
+            isBreastfeeding: pregnancy.isBreastfeeding,
         };
 
         await db.insert(demographicsTable)

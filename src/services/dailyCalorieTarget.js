@@ -10,11 +10,23 @@ export const DEFAULT_DAILY_CALORIES = 2000;
 export const MIN_DAILY_CALORIES = 1200;
 
 const ACTIVITY_MULTIPLIERS = {
+  // 'sedentary' was missing here AND from the activity_level enum, while the
+  // profile edit screen offered it. Added 2026-11-13. The Australian Dietary
+  // Guidelines' serve table is explicitly built for people "of average height
+  // with sedentary to moderate activity levels", so the level has to exist.
+  //
+  // The gap matters: for a 70 kg, 170 cm, 30-year-old man, 1.2 gives 1,940
+  // kcal and the old moderately_active fallback would have given 2,506. With
+  // "lose weight" applied, that fallback lands at 2,006, which is maintenance
+  // dressed up as a deficit.
+  sedentary: 1.2,
   lightly_active: 1.375,
   moderately_active: 1.55,
   very_active: 1.725,
   super_active: 1.9,
 };
+
+export const ACTIVITY_LEVELS = Object.freeze(Object.keys(ACTIVITY_MULTIPLIERS));
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -82,7 +94,13 @@ export const estimateDailyCaloriesFromDemographics = (demographics, { today = ne
   const bmr = calculateBmr({ weightKg, heightCm, age, gender: demographics.gender });
   if (!bmr) return 0;
 
-  const activityMultiplier = ACTIVITY_MULTIPLIERS[demographics.activityLevel] || ACTIVITY_MULTIPLIERS.moderately_active;
+  // Fall back to the LOWEST multiplier, not the middle one. An unrecognised
+  // level means we do not know how active someone is, and guessing high hands
+  // them extra calories they did not ask for; guessing low at worst
+  // under-feeds a target they can raise. The previous default was
+  // moderately_active, which silently inflated any unknown value by 29%.
+  const activityMultiplier =
+    ACTIVITY_MULTIPLIERS[demographics.activityLevel] ?? ACTIVITY_MULTIPLIERS.sedentary;
   let dailyTarget = bmr * activityMultiplier;
 
   if (demographics.goal === "lose_weight") dailyTarget -= 500;

@@ -5,6 +5,7 @@ import { db } from "../config/db.js";
 import { usersTable, demographicsTable } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
+import { isValidActivityLevel, resolvePregnancyFields } from "../services/demographicsRules.js";
 
 const profileRoutes = express.Router();
 
@@ -82,17 +83,48 @@ profileRoutes.put("/name/:clerkId", requireClerkAuth, ensureClerkIdMatch("params
 // Update the user's physical demographics
 profileRoutes.put("/update/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
     try {
-        const { weight, height, age, gender, activityLevel, goal } = req.body;
+        const { weight, height, gender, activityLevel, goal, isPregnant, isBreastfeeding } = req.body;
         const userId = req.dbUser.userId;
 
-        // Update the demographics table
+        // Same rule as the onboarding save, from the same shared file. Without
+        // it, a value outside the activity_level enum came back as a 500.
+        if (activityLevel !== undefined && !isValidActivityLevel(activityLevel)) {
+            return res.status(400).json({
+                error: "Unrecognised activity level.",
+                code: "INVALID_ACTIVITY_LEVEL",
+            });
+        }
+
+        // The edit screen never sends gender, so the pregnancy rule has to be
+        // applied against the gender being SAVED: the new one if this request
+        // changes it, otherwise the stored one. Checking only the request would
+        // let a male user keep is_pregnant = true.
+        const [stored] = await db
+            .select({ gender: demographicsTable.gender })
+            .from(demographicsTable)
+            .where(eq(demographicsTable.userId, userId))
+            .limit(1);
+        const pregnancy = resolvePregnancyFields({
+            gender: gender ?? stored?.gender,
+            isPregnant,
+            isBreastfeeding,
+            // A partial edit: a field not sent is left exactly as it is.
+            skippedMeansNull: false,
+        });
+
+        // `age` used to be passed here too. There is no age column (age is
+        // derived from date_of_birth), so Drizzle silently dropped it and the
+        // route still reported success. Removed rather than left as a trap;
+        // the edit screen never sent it anyway. Making age editable is a
+        // separate change: it has to write date_of_birth.
         await db.update(demographicsTable).set({
             weight: Number(weight),
             height: Number(height),
-            age: Number(age),
             gender,
             activityLevel,
             goal,
+            isPregnant: pregnancy.isPregnant,
+            isBreastfeeding: pregnancy.isBreastfeeding,
             updatedAt: new Date()
         }).where(eq(demographicsTable.userId, userId));
 
