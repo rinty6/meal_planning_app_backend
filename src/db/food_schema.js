@@ -65,6 +65,18 @@ export const nutritionProfilesTable = pgTable('nutrition_profiles', {
   vitaminAConvention: text('vitamin_a_convention'),
   vitaminCMg: nutrient('vitamin_c_mg'),
 
+  // Grams of pure alcohol per basis quantity. AUSNUT publishes it as
+  // "Alcohol (g)" and it was simply never imported.
+  //
+  // It is how a standard drink becomes exact rather than estimated:
+  // Australia defines one standard drink as 10 g of pure alcohol whatever the
+  // drink, so standard_drinks = alcohol_g * grams / 100 / 10, with no alc/vol
+  // table and no ethanol-density assumption.
+  //
+  // This does NOT change the energy figures. AUSNUT's energy already includes
+  // alcohol at 29 kJ/g, so there is no double count to correct.
+  alcoholG: nutrient('alcohol_g'),
+
   calculationMethod: text('calculation_method').notNull(),
   confidence: numeric('confidence', { precision: 5, scale: 4, mode: 'number' }),
 
@@ -151,10 +163,39 @@ export const catalogFoodsTable = pgTable('catalog_foods', {
   verificationStatus: text('verification_status').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
 
+  // Can this food be put on a meal card as itself?
+  //
+  //   servable    eaten or drunk as itself. Cooked rice, miso paste, an apple,
+  //               a raw salad, red wine.
+  //   component   edible and real, but only ever part of something else. Oil,
+  //               tomato paste, gravy, salad dressing. Valid inside a recipe,
+  //               valid to log and to cost, never a standalone card.
+  //   ingredient  not consumable as served. Flour, dry gravy powder, uncooked
+  //               pasta, raw mince, stock cubes. Never shown in planning.
+  //   NULL        not classified. Only the 3,741 generic foods are; the
+  //               46,002 branded ones are not. A planner query asking for
+  //               `= 'servable'` therefore excludes them, which is correct and
+  //               is the same fail-closed shape as the allergen filter.
+  //
+  // A column rather than a satellite table because, unlike a price, this is an
+  // intrinsic and stable property of the food, like food_type, and the planner
+  // filters on it on every request. Written only by tools/food_classify.
+  servability: text('servability'),
+  servabilityReason: text('servability_reason'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (table) => ({
   publicIdUnique: uniqueIndex('catalog_foods_public_id_unique').on(table.publicId),
+
+  servabilityCheck: check('catalog_foods_servability_check',
+    sql`${table.servability} IS NULL
+        OR ${table.servability} IN ('servable', 'component', 'ingredient')`),
+
+  // The planner's hottest predicate: every candidate query starts by asking
+  // for servable generic foods.
+  servabilityIdx: index('catalog_foods_servability_idx')
+    .on(table.servability).where(sql`${table.servability} = 'servable'`),
   publicIdCheck: check('catalog_foods_public_id_check',
     sql`${table.publicId} LIKE 'food\\_%'`),
 
@@ -309,6 +350,60 @@ export const foodCategoriesTable = pgTable('food_categories', {
 }));
 
 // Many-to-many: foods <-> allergens/diets/tags.
+// Australian Dietary Guidelines serves per 100 g, one row per food.
+//
+// Imported from AUSNUT 2023's own "Australian Dietary Guidelines profiles"
+// workbook, TAB B. AUSNUT has already done the work: it publishes serves per
+// 100 g per food, and the figures reconcile exactly with the NHMRC serve
+// sizes, checked 2026-11-12:
+//
+//   Apple, raw           0.667 fruit serves/100 g  ->  150 g per serve
+//   Beef mince, cooked   1.538 meat  serves/100 g  ->   65 g per serve
+//   Cheese, cheddar      2.500 dairy serves/100 g  ->   40 g per serve
+//   Bread, white         2.500 grain serves/100 g  ->   40 g per serve
+//
+// So there is no hand-built mapping and no hand-written serve-size table to
+// drift: this is an import, and the checker reconciles it against the
+// published serve sizes rather than trusting it.
+//
+// A satellite table rather than columns on catalog_foods because this is
+// derived data with its own provenance, the same shape as nutrition_profiles.
+export const foodAdgServesTable = pgTable('food_adg_serves', {
+  foodId: bigint('food_id', { mode: 'number' })
+    .references(() => catalogFoodsTable.id, { onDelete: 'cascade' })
+    .primaryKey(),
+
+  // The five food groups the ADG daily targets are expressed in.
+  grainServes: numeric('grain_serves', { precision: 8, scale: 4, mode: 'number' }),
+  vegetableServes: numeric('vegetable_serves', { precision: 8, scale: 4, mode: 'number' }),
+  fruitServes: numeric('fruit_serves', { precision: 8, scale: 4, mode: 'number' }),
+  dairyServes: numeric('dairy_serves', { precision: 8, scale: 4, mode: 'number' }),
+  proteinServes: numeric('protein_serves', { precision: 8, scale: 4, mode: 'number' }),
+
+  // Tracked separately by the guidelines, and needed for the water target.
+  waterServes: numeric('water_serves', { precision: 8, scale: 4, mode: 'number' }),
+  oilsServes: numeric('oils_serves', { precision: 8, scale: 4, mode: 'number' }),
+
+  // NOT an AUSNUT column. The ADG measures the discretionary allowance in
+  // kilojoules (about 600 kJ per serve), not in food-group serves, which is
+  // why 334 foods have zero serves in every group above: beer, confectionery
+  // and the like. Derived as energy_kj / 600 for foods already carrying the
+  // AUSNUT discretionary flag, and 0 for everything else.
+  discretionaryServes: numeric('discretionary_serves', { precision: 8, scale: 4, mode: 'number' }),
+
+  sourceName: text('source_name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  // Serves are a quantity of food: never negative, and a cap that would catch
+  // a units mix-up (the largest real value is about 3 serves per 100 g).
+  nonNegative: check('food_adg_serves_non_negative',
+    sql`${table.grainServes} >= 0 and ${table.vegetableServes} >= 0
+        and ${table.fruitServes} >= 0 and ${table.dairyServes} >= 0
+        and ${table.proteinServes} >= 0 and ${table.waterServes} >= 0
+        and ${table.oilsServes} >= 0 and ${table.discretionaryServes} >= 0`),
+}));
+
 export const foodAttributesTable = pgTable('food_attributes', {
   foodId: bigint('food_id', { mode: 'number' })
     .references(() => catalogFoodsTable.id, { onDelete: 'cascade' }).notNull(),
