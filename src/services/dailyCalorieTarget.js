@@ -7,6 +7,7 @@ import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { calorieGoalsTable, demographicsTable } from "../db/schema.js";
 import { resolveServeTargets } from "./adgServeTargets.js";
 import { resolveWaterTarget } from "./waterTarget.js";
+import { resolveAlcoholBudget } from "./alcoholBudget.js";
 
 export const DEFAULT_DAILY_CALORIES = 2000;
 export const MIN_DAILY_CALORIES = 1200;
@@ -153,6 +154,9 @@ export const resolveDailyCalorieTarget = ({
   };
   const serveTargets = resolveServeTargets(person);
   const waterTarget = resolveWaterTarget(person);
+  // The alcohol ceiling (m4-07) uses the same person too. It is a limit, not
+  // a target: nothing in the planner tries to reach it.
+  const alcoholBudget = resolveAlcoholBudget(person);
 
   const activeGoal = findActiveCalorieGoal(goals, dateStr);
   if (activeGoal) {
@@ -165,6 +169,7 @@ export const resolveDailyCalorieTarget = ({
       ),
       serveTargets,
       waterTarget,
+      alcoholBudget,
       demographics,
     };
   }
@@ -182,6 +187,7 @@ export const resolveDailyCalorieTarget = ({
       dailyCalories: estimatedCalories,
       serveTargets,
       waterTarget,
+      alcoholBudget,
       demographics,
     };
   }
@@ -197,6 +203,7 @@ export const resolveDailyCalorieTarget = ({
     dailyCalories: DEFAULT_DAILY_CALORIES,
     serveTargets,
     waterTarget,
+    alcoholBudget,
     demographics,
   };
 };

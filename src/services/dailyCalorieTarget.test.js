@@ -153,3 +153,26 @@ test("estimated and explicit targets respect the minimum", () => {
   assert.equal(lowEstimate, MIN_DAILY_CALORIES);
   assert.equal(lowGoal.dailyCalories, MIN_DAILY_CALORIES);
 });
+
+test("the alcohol budget rides along and follows age and pregnancy (m4-07)", () => {
+  const adult = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics, today: TODAY });
+  const pregnant = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    goals: [],
+    demographics: { ...demographics, gender: "female", isPregnant: true, isBreastfeeding: false },
+    today: TODAY,
+  });
+  const teen = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    goals: [],
+    demographics: { ...demographics, dateOfBirth: new Date(2009, 0, 1) },
+    today: TODAY,
+  });
+  const noProfile = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics: null, today: TODAY });
+
+  assert.equal(adult.alcoholBudget.weeklyMax, 10);
+  assert.equal(adult.alcoholBudget.dailyMax, 4);
+  assert.equal(pregnant.alcoholBudget.weeklyMax, 0);
+  assert.equal(teen.alcoholBudget.reason, "under_18");
+  assert.equal(noProfile.alcoholBudget.reason, "age_unknown");
+});
