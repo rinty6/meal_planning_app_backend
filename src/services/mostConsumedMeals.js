@@ -1,8 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { mealLogsTable } from "../db/schema.js";
-
-const MEAL_TYPES = ["breakfast", "lunch", "dinner"];
+import { MEAL_TYPES } from "./mealTypes.js";
 
 const toNumber = (value) => {
   const parsed = Number(value);

@@ -10,6 +10,7 @@ import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js"
 import { getCalorieTargetBand, resolveCalorieZone } from "../services/calorieTargetBand.js";
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
+import { MEAL_TYPES } from "../services/mealTypes.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 import { formatEnergyKj } from "../utils/energy.js";
 
@@ -351,11 +352,13 @@ mealRoutes.get("/recent/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"
       .orderBy(desc(mealLogsTable.createdAt))
       .limit(50);
 
-    const recent = { breakfast: [], lunch: [], dinner: [] };
+    // One bucket per shared meal type, so snack logs come back too (m4-09).
+    // Older app builds ignore the extra key.
+    const recent = Object.fromEntries(MEAL_TYPES.map((type) => [type, []]));
     const seen = new Set();
 
     for (const meal of meals) {
-      if (!["breakfast", "lunch", "dinner"].includes(meal.mealType)) continue;
+      if (!MEAL_TYPES.includes(meal.mealType)) continue;
       const key = `${meal.mealType}-${meal.foodName.toLowerCase().trim()}`;
 
       if (!seen.has(key)) {

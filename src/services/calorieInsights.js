@@ -2,9 +2,13 @@
 // analysis window, keeping adherence calculations aligned with the daily dashboard.
 import { resolveDailyCalorieTarget } from "./dailyCalorieTarget.js";
 import { formatEnergyKj } from "../utils/energy.js";
+import { MEAL_TYPES } from "./mealTypes.js";
 
 const WEEKDAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const MEAL_TYPE_ORDER = ["breakfast", "lunch", "dinner"];
+// Snack is a fourth slot here (m4-09, decision D4). The meal pattern averages
+// each slot over the days it WAS logged, so a day without a snack is never a
+// zero, a gap or a skip. Nothing in this file treats any slot as expected.
+const MEAL_TYPE_ORDER = MEAL_TYPES;
 
 const FOOD_TAG_RULES = [
   {
@@ -360,7 +364,7 @@ const buildMealPatternInsight = ({ meals, mealCount, loggedDays }) => {
       averages,
       trend: "neutral",
       summary: "Meal-slot trends will appear once you log breakfast, lunch, or dinner more consistently.",
-      detail: "This phase uses breakfast, lunch, and dinner averages instead of clock times.",
+      detail: "This phase uses breakfast, lunch, dinner and snack averages instead of clock times.",
     };
   }
 

@@ -180,8 +180,9 @@ export const mealLogsTable = pgTable('meal_logs', {
   // Which day is this for?
   date: date('date').notNull(), 
   
-  // Breakfast, Lunch, or Dinner?
-  mealType: text('meal_type').notNull(), // 'breakfast', 'lunch', 'dinner'
+  // Breakfast, Lunch, Dinner or Snack? Plain text, not an enum: the valid
+  // values are MEAL_TYPES in services/mealTypes.js. 'snack' is valid (m4-09).
+  mealType: text('meal_type').notNull(), // 'breakfast', 'lunch', 'dinner', 'snack'
   
   // Data from FatSecret (or your custom dish)
   foodName: text('food_name').notNull(),

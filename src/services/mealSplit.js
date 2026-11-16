@@ -23,7 +23,11 @@
 // (default used, one warning logged) rather than crashing the server or
 // silently planning a broken day.
 
-export const MEAL_SLOTS = Object.freeze(["breakfast", "lunch", "dinner", "snack"]);
+import { MEAL_TYPES } from "./mealTypes.js";
+
+// The slots are the shared meal types (services/mealTypes.js, m4-09). The
+// name MEAL_SLOTS stays because the planner and its tests import it.
+export const MEAL_SLOTS = MEAL_TYPES;
 
 export const DEFAULT_MEAL_SPLIT = Object.freeze({
   breakfast: 0.25,
