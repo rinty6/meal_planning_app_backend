@@ -102,6 +102,19 @@ test("serve targets follow the stored pregnancy answers", () => {
     today: TODAY,
   });
   assert.equal(result.serveTargets.row, "pregnant_19_plus");
+  assert.equal(result.waterTarget.fluidsMl, 2300);
+});
+
+test("water target rides along on every calorie source (m4-06)", () => {
+  const fromGoal = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    demographics,
+    today: TODAY,
+    goals: [{ id: 1, dailyCalories: 3200, startDate: DATE, endDate: DATE }],
+  });
+  const fallback = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics: null, today: TODAY });
+  assert.equal(fromGoal.waterTarget.fluidsMl, 2600);
+  assert.equal(fallback.waterTarget.source, "nrv_default");
 });
 
 test("missing demographics still returns default serve targets", () => {

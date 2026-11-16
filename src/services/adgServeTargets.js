@@ -21,6 +21,8 @@
 // Pure: no database, no clock. The caller passes the age. That keeps it
 // testable and lets dailyCalorieTarget.js own the one age calculation.
 
+import { applyLifeStage, resolveLifeStage } from "./lifeStage.js";
+
 export const SERVE_GROUPS = Object.freeze(["vegetable", "fruit", "grain", "protein", "dairy"]);
 
 // [vegetable, fruit, grain, protein, dairy, additionalMax]
@@ -53,39 +55,14 @@ const FIELDS = [...SERVE_GROUPS, "additionalMax"];
 // quarter UP (2.75 -> 3) so a derived target is never below the midpoint.
 const toHalfServe = (value) => Math.ceil(value * 2 - 1e-9) / 2;
 
-const combine = (left, right, pick) => {
-  const out = {};
-  for (const field of FIELDS) out[field] = pick(left[field], right[field]);
-  return Object.freeze(out);
-};
-
-/**
- * Which age band of the table applies. Ages below 19 use 14-18: the app's
- * minimum is 16, and an unknown age (0) falls into the adult band instead.
- * "70+" in the guidelines follows "51-70", so it starts at 71.
- */
-const ageBand = (age) => {
-  if (!Number.isFinite(age) || age <= 0) return "19_50";
-  if (age < 19) return "14_18";
-  if (age <= 50) return "19_50";
-  if (age <= 70) return "51_70";
-  return "70_plus";
-};
-
 /**
  * The daily serve targets for one person.
  *
- * Rules where the guidelines have no row (decided 2026-11-16):
- *   Gender "other" or unknown  midpoint of the male and female rows for that
- *                              age, rounded up to the half serve. Matches the
- *                              calorie formula, which also uses the midpoint.
- *   Pregnant AND breastfeeding the larger of the two rows, group by group, so
- *                              neither need is under-served.
- *   Pregnant aged 51+          the adult pregnant row (pregnancy rows are only
- *                              split into "up to 18" and "19 and over").
- *
- * Pregnancy is ignored for a male user, matching demographicsRules.js, which
- * never stores it for one in the first place.
+ * Which row applies, including the three cases the guidelines have no row
+ * for (gender Other, pregnant AND breastfeeding, pregnant aged 51+), is
+ * decided in lifeStage.js, shared with the water target so the two can never
+ * describe different people. This file only supplies the table and the
+ * half-serve rounding.
  *
  * @param {object} p
  * @param {number} p.age              whole years; 0 or missing = unknown
@@ -95,39 +72,11 @@ const ageBand = (age) => {
  * @returns {{vegetable:number, fruit:number, grain:number, protein:number,
  *            dairy:number, additionalMax:number, row:string, source:string}}
  */
-export const resolveServeTargets = ({ age, gender, isPregnant, isBreastfeeding } = {}) => {
-  const band = ageBand(age);
-  const sex = String(gender ?? "").toLowerCase();
-  const ageKnown = Number.isFinite(age) && age > 0;
-  const genderKnown = sex === "male" || sex === "female" || sex === "other";
-  const source = ageKnown && genderKnown ? "adg" : "adg_default";
-
-  if (sex !== "male" && (isPregnant === true || isBreastfeeding === true)) {
-    const lifeStage = band === "14_18" ? "14_18" : "19_plus";
-    const pregnant = ADG_SERVE_TABLE[`pregnant_${lifeStage}`];
-    const lactating = ADG_SERVE_TABLE[`lactating_${lifeStage}`];
-
-    if (isPregnant === true && isBreastfeeding === true) {
-      return {
-        ...combine(pregnant, lactating, Math.max),
-        row: `max(pregnant_${lifeStage},lactating_${lifeStage})`,
-        source,
-      };
-    }
-    const key = isPregnant === true ? `pregnant_${lifeStage}` : `lactating_${lifeStage}`;
-    return { ...ADG_SERVE_TABLE[key], row: key, source };
-  }
-
-  if (sex === "male" || sex === "female") {
-    const key = `${sex}_${band}`;
-    return { ...ADG_SERVE_TABLE[key], row: key, source };
-  }
-
-  const male = ADG_SERVE_TABLE[`male_${band}`];
-  const female = ADG_SERVE_TABLE[`female_${band}`];
+export const resolveServeTargets = (person = {}) => {
+  const stage = resolveLifeStage(person);
   return {
-    ...combine(male, female, (m, f) => toHalfServe((m + f) / 2)),
-    row: `midpoint(male_${band},female_${band})`,
-    source,
+    ...applyLifeStage(ADG_SERVE_TABLE, stage, FIELDS, toHalfServe),
+    row: stage.row,
+    source: stage.source === "known" ? "adg" : "adg_default",
   };
 };
