@@ -75,7 +75,8 @@ const CACHE_MAX_ENTRIES = 500;
  * @property {{ id: number, description: string, grams_equivalent: number|null, metric_amount: number|null, metric_unit: string|null }} serving
  * @property {{ energy_kj: number|null, calories_kcal: number|null, protein_g: number|null, fat_g: number|null,
  *              carbohydrate_g: number|null, fiber_g: number|null, sugar_g: number|null, sodium_mg: number|null,
- *              vitamin_a_mcg: number|null, vitamin_a_convention: string|null }} nutrition
+ *              vitamin_a_mcg: number|null, vitamin_a_convention: string|null, alcohol_g: number|null }} nutrition
+ *   alcohol_g is grams in this serving (m4-10): 0 is a known none, null is unknown.
  *   Vitamin A is returned WITH its convention and must never be compared across conventions (decided 2026-09-03).
  */
 
@@ -246,6 +247,7 @@ export const buildSearchSql = ({ query, segments, source, limit, offset }) => {
         ${F8(sql`p.sodium_mg`)} as sodium_mg,
         ${F8(sql`p.vitamin_a_mcg`)} as vitamin_a_mcg,
         p.vitamin_a_convention,
+        ${F8(sql`p.alcohol_g`)} as alcohol_g,
         ${WORDS(sql`f.name`)} as name_words,
         word_similarity(${query}, f.normalized_name) as wsim
       from catalog_foods f
@@ -339,7 +341,8 @@ export const buildSearchSql = ({ query, segments, source, limit, offset }) => {
             'sugar_g', p.sugar_g,
             'sodium_mg', p.sodium_mg,
             'vitamin_a_mcg', p.vitamin_a_mcg,
-            'vitamin_a_convention', p.vitamin_a_convention
+            'vitamin_a_convention', p.vitamin_a_convention,
+            'alcohol_g', p.alcohol_g
           )
         ) order by p.rn), '[]'::json) from page p) as items,
       (select coalesce(json_agg(json_build_object('value', value, 'count', count) order by count desc, value), '[]'::json)

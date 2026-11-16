@@ -114,6 +114,7 @@ export const clearBarcodeLookupCache = () => {
 
 const F8 = (col) => sql`(${col})::float8`;
 
+// alcohol_g is grams in this serving (m4-10): 0 is a known none, null is unknown.
 const NUTRITION_JSON = (alias) => sql`json_build_object(
   'energy_kj', ${F8(sql`${alias}.energy_kj`)},
   'calories_kcal', ${F8(sql`${alias}.calories_kcal`)},
@@ -125,7 +126,8 @@ const NUTRITION_JSON = (alias) => sql`json_build_object(
   'sodium_mg', ${F8(sql`${alias}.sodium_mg`)},
   'saturated_fat_g', ${F8(sql`${alias}.saturated_fat_g`)},
   'vitamin_a_mcg', ${F8(sql`${alias}.vitamin_a_mcg`)},
-  'vitamin_a_convention', ${alias}.vitamin_a_convention
+  'vitamin_a_convention', ${alias}.vitamin_a_convention,
+  'alcohol_g', ${F8(sql`${alias}.alcohol_g`)}
 )`;
 
 // The neon-http driver does NOT serialise a JS array into a Postgres array

@@ -84,6 +84,9 @@ const DEFAULT_QUERIES_BY_MEAL = {
   dinner: ["Grilled Chicken", "Salmon", "Stir Fry", "Curry", "Pasta"],
 };
 
+// FROZEN (m1-11): keyword lists from before the attribute filter. Kept only
+// until m5-01 moves candidates onto the catalogue, so a regression can be
+// compared against them. Do not add words and do not import these elsewhere.
 const ALLERGEN_KEYWORDS = {
   Egg: ["egg", "eggs", "omelet", "omelette", "scramble", "scrambled"],
   Fish: ["fish", "salmon", "tuna", "cod", "sardine", "anchovy", "mackerel"],
@@ -97,6 +100,7 @@ const ALLERGEN_KEYWORDS = {
   Soy: ["soy", "soya", "tofu", "edamame", "tempeh", "miso"],
 };
 
+// FROZEN (m1-11): see the note above ALLERGEN_KEYWORDS.
 const VEGAN_BLOCKLIST = [
   "beef",
   "chicken",
@@ -122,6 +126,7 @@ const VEGAN_BLOCKLIST = [
   "honey",
 ];
 
+// FROZEN (m1-11): see the note above ALLERGEN_KEYWORDS.
 const VEGETARIAN_BLOCKLIST = [
   "beef",
   "chicken",
