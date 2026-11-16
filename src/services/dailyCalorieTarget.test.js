@@ -71,6 +71,44 @@ test("an expired or future goal falls back to the onboarding baseline", () => {
   assert.equal(result.dailyCalories, 2759);
 });
 
+test("serve targets ride along and do not change with the calorie source (m4-04)", () => {
+  const fromProfile = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics, today: TODAY });
+  const fromGoal = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    demographics,
+    today: TODAY,
+    goals: [{ id: 1, dailyCalories: 3200, startDate: DATE, endDate: DATE }],
+  });
+  const gaining = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    goals: [],
+    demographics: { ...demographics, goal: "gain_muscle" },
+    today: TODAY,
+  });
+
+  // Born 1996-01-01, so 30 on TODAY.
+  assert.equal(fromProfile.serveTargets.row, "male_19_50");
+  assert.notEqual(fromGoal.dailyCalories, fromProfile.dailyCalories);
+  assert.notEqual(gaining.dailyCalories, fromProfile.dailyCalories);
+  assert.deepEqual(fromGoal.serveTargets, fromProfile.serveTargets);
+  assert.deepEqual(gaining.serveTargets, fromProfile.serveTargets);
+});
+
+test("serve targets follow the stored pregnancy answers", () => {
+  const result = resolveDailyCalorieTarget({
+    dateStr: DATE,
+    goals: [],
+    demographics: { ...demographics, gender: "female", isPregnant: true, isBreastfeeding: false },
+    today: TODAY,
+  });
+  assert.equal(result.serveTargets.row, "pregnant_19_plus");
+});
+
+test("missing demographics still returns default serve targets", () => {
+  const result = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics: null, today: TODAY });
+  assert.equal(result.serveTargets.source, "adg_default");
+});
+
 test("missing demographics uses the hardcoded fallback", () => {
   const result = resolveDailyCalorieTarget({ dateStr: DATE, goals: [], demographics: null, today: TODAY });
 

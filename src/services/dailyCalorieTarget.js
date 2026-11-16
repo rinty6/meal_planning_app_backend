@@ -5,6 +5,7 @@
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 
 import { calorieGoalsTable, demographicsTable } from "../db/schema.js";
+import { resolveServeTargets } from "./adgServeTargets.js";
 
 export const DEFAULT_DAILY_CALORIES = 2000;
 export const MIN_DAILY_CALORIES = 1200;
@@ -136,6 +137,18 @@ export const resolveDailyCalorieTarget = ({
   demographics = null,
   today = new Date(),
 }) => {
+  // Serve targets ride along with every calorie target, built from the same
+  // demographics row and the same `today`, so a profile change can never
+  // leave stale serves next to a fresh calorie figure (checklist m4-04).
+  // They do NOT depend on which calorie source wins below: a calorie goal or
+  // lose/maintain/gain changes the total energy, never the minimum serves.
+  const serveTargets = resolveServeTargets({
+    age: getAgeFromDateOfBirth(demographics?.dateOfBirth, today),
+    gender: demographics?.gender ?? null,
+    isPregnant: demographics?.isPregnant ?? null,
+    isBreastfeeding: demographics?.isBreastfeeding ?? null,
+  });
+
   const activeGoal = findActiveCalorieGoal(goals, dateStr);
   if (activeGoal) {
     return {
@@ -145,6 +158,7 @@ export const resolveDailyCalorieTarget = ({
         MIN_DAILY_CALORIES,
         Math.round(toNumber(activeGoal.dailyCalories) || DEFAULT_DAILY_CALORIES)
       ),
+      serveTargets,
       demographics,
     };
   }
@@ -160,6 +174,7 @@ export const resolveDailyCalorieTarget = ({
         dailyCalories: estimatedCalories,
       },
       dailyCalories: estimatedCalories,
+      serveTargets,
       demographics,
     };
   }
@@ -173,6 +188,7 @@ export const resolveDailyCalorieTarget = ({
       dailyCalories: DEFAULT_DAILY_CALORIES,
     },
     dailyCalories: DEFAULT_DAILY_CALORIES,
+    serveTargets,
     demographics,
   };
 };
