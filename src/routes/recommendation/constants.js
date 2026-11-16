@@ -5,6 +5,9 @@ export const ML_URL = process.env.ML_SERVICE_URL || "http://127.0.0.1:5001/api/r
 // NOTE: Prime endpoint warms ML caches on login without blocking recommendations.
 export const ML_PRIME_URL = process.env.ML_SERVICE_PRIME_URL || "http://127.0.0.1:5001/api/prime";
 
+// FROZEN 2026-11-16 (m4-05). This split belongs to the retired ML path and
+// no screen plans with it. The planner's split is services/mealSplit.js.
+// Do not import this from anywhere new; it is deleted with this folder.
 export const DEFAULT_MEAL_ALLOCATIONS = {
   // NOTE: Default ratios align with combo targets (20/30/50).
   breakfast: 0.20,

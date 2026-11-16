@@ -13,6 +13,7 @@ import {
 } from "../db/schema.js";
 import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
+import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -292,11 +293,10 @@ const getSavedPreferences = async (userId) => {
   return normalizePreferences(rows[0]);
 };
 
-const buildMealTargets = (dailyTarget) => ({
-  breakfast: Math.round(dailyTarget * 0.3),
-  lunch: Math.round(dailyTarget * 0.35),
-  dinner: Math.round(dailyTarget * 0.35),
-});
+// The split lives in services/mealSplit.js (m4-05), shared and tunable with
+// MEAL_SPLIT. This planner fills only the three meals until the snack slot
+// exists (m5-04), so the three are scaled up to cover the whole day.
+const buildMealTargets = (dailyTarget) => buildMealCalorieTargets(dailyTarget, { slots: MEAL_TYPES });
 
 const itemIdentity = (item) =>
   normalizeWhitespace(item?.fatsecret_food_id || item?.food_id || item?.recipe_id || item?.id || item?.title);
