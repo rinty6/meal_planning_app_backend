@@ -188,6 +188,14 @@ test("too few candidates: fewer plates, and the shortfall is reported", () => {
   assert.equal(shortBy, PLATES_PER_MEAL - 2);
 });
 
+test("a plate more than 25% from its target is not offered", () => {
+  const yoghurt = food({ name: "Yoghurt, natural", group: "ausnut-192", kcal: 90, serves: { dairy: 1 },
+    servings: [{ description: "1 tub (150 g)", grams: 150, isDefault: true }] });
+  const { plates, shortBy } = buildPlates({ mains: [yoghurt], sides: [veg(5), rice(5)], meal: "breakfast", targetKcal: 900 });
+  assert.equal(plates.length, 0);
+  assert.equal(shortBy, PLATES_PER_MEAL);
+});
+
 test("no target, no plates", () => {
   const { mains, sides } = dinnerPool();
   assert.equal(buildPlates({ mains, sides, meal: "dinner", targetKcal: 0 }).plates.length, 0);
@@ -202,6 +210,8 @@ test("herbs, powders, wrappers and uncooked dry legumes never go on a plate", ()
   assert.equal(isPlateWorthy({ name: "Lentil, dried", subgroup_code: "ausnut-251" }), false);
   assert.equal(isPlateWorthy({ name: "Pea, split, dried, boiled, drained", subgroup_code: "ausnut-251" }), true);
   assert.equal(isPlateWorthy({ name: "Fig, dried", subgroup_code: "ausnut-168" }), true); // dried fruit is a real snack
+  assert.equal(isPlateWorthy({ name: "Breadcrumbs, for coating food", subgroup_code: "ausnut-122" }), false);
+  assert.equal(isPlateWorthy({ name: "Lemon peel, raw", subgroup_code: "ausnut-163" }), false);
 });
 
 test("a side is never the same kind of food as the main or the other side", () => {

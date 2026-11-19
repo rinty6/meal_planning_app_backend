@@ -39,6 +39,11 @@ export const SIDE_ORDER = Object.freeze({
   snack: ["fruit", "dairy", "grain"],
 });
 export const MAX_SIDES = 2;
+// A plate further than this from its meal's energy target is not offered. A
+// low-energy main (yoghurt as a large breakfast) cannot reach the target at a
+// sane portion, and offering it anyway would quietly under-feed the user.
+// Too few plates is reported (shortBy) instead.
+export const MAX_ENERGY_MISS = 0.25;
 export const MAX_SIDE_REPEAT = 2;
 export const MAX_PER_MAIN_GROUP = 2;
 // Realistic portion limits. A side of 600 g of potato is technically a
@@ -357,10 +362,13 @@ export const buildPlates = ({
   const usableMains = mains.filter((f) => !excludeFoodIds.has(f.id));
   const usableSides = sides.filter((f) => !excludeFoodIds.has(f.id));
 
+  const fits = (plate) => plate && Math.abs(plate.fit - 1) <= MAX_ENERGY_MISS;
   const candidates = [];
+  const mainById = new Map();
   for (const main of shuffled(usableMains, rand).slice(0, MAINS_TRIED)) {
+    mainById.set(main.id, main);
     const plate = buildOne({ main, sides: usableSides, meal, target: targetKcal, rand, bonusFor });
-    if (plate) candidates.push(plate);
+    if (fits(plate)) candidates.push(plate);
   }
   candidates.sort((a, b) => b.score - a.score);
 
@@ -369,15 +377,26 @@ export const buildPlates = ({
   const mainGroupUse = new Map();
   const mainIds = new Set();
   const mainKinds = new Set(); // "pizza" once per meal, however many pizzas exist
-  for (const plate of candidates) {
+  for (const candidate of candidates) {
     if (plates.length >= count) break;
+    let plate = candidate;
     const main = plate.items[0];
     const kind = String(main.name || "").split(",")[0].trim().toLowerCase();
     if (mainIds.has(main.foodId)) continue;
     if (kind && mainKinds.has(kind)) continue;
     if ((mainGroupUse.get(main.group) || 0) >= MAX_PER_MAIN_GROUP) continue;
+    const overused = (id) => (sideUse.get(id) || 0) >= MAX_SIDE_REPEAT;
+    if (plate.items.slice(1).some((i) => overused(i.foodId))) {
+      // Same main, sides not yet used twice. Without this a good main is lost
+      // only because its first sides were popular.
+      const retry = buildOne({
+        main: mainById.get(main.foodId), sides: usableSides.filter((s) => !overused(s.id)),
+        meal, target: targetKcal, rand, bonusFor,
+      });
+      if (!fits(retry)) continue;
+      plate = retry;
+    }
     const sideIds = plate.items.slice(1).map((i) => i.foodId);
-    if (sideIds.some((id) => (sideUse.get(id) || 0) >= MAX_SIDE_REPEAT)) continue;
     plates.push(plate);
     mainIds.add(main.foodId);
     if (kind) mainKinds.add(kind);

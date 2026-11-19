@@ -193,6 +193,8 @@ const NOT_ON_A_PLATE = [
   /^(thyme|parsley|basil|coriander|mint|chives|dill|rosemary|oregano|sage|tarragon|marjoram|lemongrass|bay leaf|garlic|ginger|chilli|chili)\b/i,
   /\bpowder\b/i,
   /\b(wrapper|pastry sheet)\b/i, // "Rice paper wrapper": an ingredient
+  /^(lemon|lime)\b|\b(peel|zest|preserved lemon)\b/i, // flavourings, not a fruit serve
+  /\bbreadcrumbs?\b/i, // "Breadcrumbs for coating food": an ingredient
 ];
 const DRY_UNCOOKED = /\bdried\b/i;
 const COOKED_WORDS = /\b(boiled|cooked|canned|soaked|stewed|steamed|microwaved|baked|roasted)\b/i;

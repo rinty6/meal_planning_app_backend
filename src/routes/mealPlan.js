@@ -14,6 +14,7 @@ import {
 import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
+import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -850,7 +851,11 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     // recommendation generation, not merely display metadata in the response.
     const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
     const dailyTarget = targetContext.dailyCalories;
+    // Read per request, so changing MEAL_PLAN_SOURCE on Railway takes effect
+    // on the restart that applies it, and the two sources never share a cache entry.
+    const catalogPlates = isCatalogPlannerEnabled();
     const cacheKey = JSON.stringify({
+      source: catalogPlates ? "catalog_plates" : "fatsecret_v3",
       userId: user.userId,
       mealType: selectedMealType || "all",
       dateStr,
@@ -879,6 +884,71 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
 
       const mealTargets = buildMealTargets(dailyTarget);
       const mealTypesToBuild = selectedMealType ? [selectedMealType] : MEAL_TYPES;
+
+      // m5-01: catalogue plates, behind MEAL_PLAN_SOURCE=catalog. The FatSecret
+      // path below stays untouched and is the default until plates are
+      // verified on a device; then it is removed (strangler rule).
+      if (catalogPlates) {
+        const catalog = await buildCatalogRecommendations({
+          db,
+          userId: user.userId,
+          dateStr,
+          mealTypes: mealTypesToBuild,
+          mealTargets,
+          preferences,
+          mostConsumedByMeal: mostConsumed.byMeal,
+          favoriteTitles,
+          eventProfile,
+          explorationSeed: forceExploration ? explorationSeed || String(Date.now()) : undefined,
+        });
+        if (catalog.blocked.length > 0) {
+          console.error("[mealPlan.js] plates blocked: unrecognised preference labels", catalog.blocked);
+        }
+        // Plates carry catalogue photos; only the most-consumed strip still
+        // needs the shared image resolver.
+        try {
+          await enrichRecommendationImages({ most_consumed: mostConsumed.all });
+        } catch (enrichError) {
+          console.warn("Meal plan enrichment failed (non-fatal):", enrichError?.message || enrichError);
+        }
+        const recommendationsByMeal = catalog.recommendationsByMeal;
+        const catalogPayload = {
+          source: "catalog_plates",
+          recommendationsByMeal,
+          recommendedByMeal: recommendationsByMeal,
+          recommended: selectedMealType ? recommendationsByMeal[selectedMealType] : undefined,
+          meal_calorie_targets: mealTargets,
+          meal_calorie_target: selectedMealType ? mealTargets[selectedMealType] : undefined,
+          daily_calorie_target: dailyTarget,
+          daily_calorie_target_source: targetContext.source,
+          most_consumed_items: mostConsumed.all,
+          most_consumed_by_meal: mostConsumed.byMeal,
+          preferences,
+          active_filter_count: countActiveFilters(preferences),
+          allowed_allergens: ALLOWED_MEAL_PLAN_ALLERGENS,
+          allowed_diets: ALLOWED_MEAL_PLAN_DIETS,
+          allowed_nutrients: NUTRIENT_KEYS,
+          used_safety_fallback: false,
+          force_exploration_used: forceExploration,
+          exploration_seed: explorationSeed || null,
+          blocked_preferences: catalog.blocked,
+          short_by_meal: catalog.shortByMeal,
+        };
+        if (!forceExploration) {
+          recommendationCache.set(cacheKey, catalogPayload);
+        }
+        const catalogDurationMs = Date.now() - requestStartedAt;
+        if (catalogDurationMs > MEAL_PLAN_SLOW_LOG_MS) {
+          console.warn("[mealPlan.js] slow recommendation build", {
+            durationMs: catalogDurationMs,
+            clerkId,
+            source: "catalog_plates",
+            mealTypesBuilt: mealTypesToBuild,
+          });
+        }
+        return catalogPayload;
+      }
+
       const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [] };
 
       await Promise.all(

@@ -33,6 +33,9 @@ import {
   warmRecommendationRouteDependencies,
 } from './routes/recommendation/dataAccess.js';
 import { warmFatSecretCache, warmFatSecretCacheInBackground } from './services/mealAPI.js';
+import { db } from './config/db.js';
+import { isCatalogPlannerEnabled } from './services/catalogPlates.js';
+import { getPlannerPool } from './services/plannerPool.js';
 import profileRoutes from './routes/profile.js';
 import deviceRoutes from './routes/devices.js';
 import notificationRoutes from './routes/notifications.js';
@@ -341,6 +344,15 @@ void ensureMealPlanStorage().catch((error) => {
 void warmRecommendationRouteDependencies().catch((error) => {
   console.error('Recommendation route warmup failed:', error);
 });
+
+// m5-01: the catalogue plate pool takes ~7 s to load cold (measured
+// 2026-11-19), then lives in memory. Load it now, so the first person to open
+// Planning after a deploy doesn't wait. Only when plates are switched on.
+if (isCatalogPlannerEnabled()) {
+  void getPlannerPool({ db })
+    .then((pool) => console.log(`[planner] catalogue pool ready: ${pool.length} foods`))
+    .catch((error) => console.error('Planner pool warmup failed:', error));
+}
 
 // Eagerly fetch the FatSecret OAuth token and prime the in-process apiCache for
 // the default Recipe and Meal-Planning searches so the first real visit after a
