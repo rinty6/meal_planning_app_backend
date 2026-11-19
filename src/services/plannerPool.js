@@ -225,6 +225,23 @@ export const isPlateWorthy = (row) => {
   return true;
 };
 
+// P6, 2026-11-20: drinks for the optional drink on each plate (DRINKS_UI.html).
+// Drink groups (tea, coffee, juice, water...) are kind "drink" in the meal
+// table and never plate foods; milk and plant milk are plate foods (snack
+// mains) and drinks too. The drink picker narrows these by name.
+const DRINK_MILK_GROUPS = new Set(["ausnut-191", "ausnut-201"]);
+
+/** Rows -> the drink list: kind "drink" rows plus milk and plant milk. */
+export const buildDrinkList = (rows = []) => {
+  const drinks = [];
+  for (const row of rows) {
+    if (kindFor(row.subgroup_code) !== "drink" && !DRINK_MILK_GROUPS.has(row.subgroup_code)) continue;
+    const food = toPoolFood(row);
+    if (food) drinks.push(food);
+  }
+  return drinks;
+};
+
 /** Rows -> pool, keeping only foods whose group can go on a plate. */
 export const buildPool = (rows = []) => {
   const foods = [];
@@ -244,21 +261,26 @@ let inFlight = null;
  * The pool, loaded at most once per POOL_MAX_AGE_MS. Concurrent callers share
  * one load. A failed load is not cached, so the next request retries.
  */
-export const getPlannerPool = async ({ db, now = Date.now(), maxAgeMs = POOL_MAX_AGE_MS } = {}) => {
-  if (cached && now - cached.loadedAt < maxAgeMs) return cached.foods;
+const loadPool = async ({ db, now = Date.now(), maxAgeMs = POOL_MAX_AGE_MS } = {}) => {
+  if (cached && now - cached.loadedAt < maxAgeMs) return cached;
   if (!inFlight) {
     inFlight = (async () => {
       const result = await db.execute(buildPoolSql());
       const rows = Array.isArray(result) ? result : result?.rows ?? [];
-      const foods = buildPool(rows);
-      cached = { foods, loadedAt: Date.now() };
-      return foods;
+      // P6, 2026-11-20: the drinks come from the same query and load.
+      cached = { foods: buildPool(rows), drinks: buildDrinkList(rows), loadedAt: Date.now() };
+      return cached;
     })().finally(() => {
       inFlight = null;
     });
   }
   return inFlight;
 };
+
+export const getPlannerPool = async (opts = {}) => (await loadPool(opts)).foods;
+
+/** The drinks list (P6), cached with the pool. */
+export const getPlannerDrinks = async (opts = {}) => (await loadPool(opts)).drinks;
 
 export const clearPlannerPool = () => {
   cached = null;

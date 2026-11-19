@@ -55,6 +55,7 @@ const run = (over = {}) => buildCatalogRecommendations({
   mealTypes: ["breakfast", "lunch", "dinner"],
   mealTargets: targets,
   getPool: async () => POOL,
+  getDrinks: async () => [], // P6: drinks have their own tests (drinkPicker.test.js)
   ...over,
 });
 

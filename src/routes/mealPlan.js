@@ -12,7 +12,7 @@ import {
   usersTable,
 } from "../db/schema.js";
 import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
-import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
+import { getAgeFromDateOfBirth, getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
@@ -945,6 +945,15 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           // approved meal pattern; all four slots since P4, and around today's
           // logs since P5 (2026-11-20).
           serveTargetsByMeal: adjusted.serveTargetsByMeal,
+          // P6, 2026-11-20: the drink picker's caffeine rules. A missing date
+          // of birth counts as an adult (age null), never as age 0.
+          person: {
+            age: targetContext.demographics?.dateOfBirth
+              ? getAgeFromDateOfBirth(targetContext.demographics.dateOfBirth)
+              : null,
+            isPregnant: !!targetContext.demographics?.isPregnant,
+            isBreastfeeding: !!targetContext.demographics?.isBreastfeeding,
+          },
         });
         if (catalog.blocked.length > 0) {
           console.error("[mealPlan.js] plates blocked: unrecognised preference labels", catalog.blocked);

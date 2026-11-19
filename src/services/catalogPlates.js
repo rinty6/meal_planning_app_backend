@@ -14,8 +14,9 @@
 // titles; moving them to food ids is m5-09. They only ever break near-ties
 // (plateBuilder caps them), so a favourite can never outrank a plate that
 // fits the target better.
-import { candidatesForMeal, getPlannerPool } from "./plannerPool.js";
-import { buildPlates } from "./plateBuilder.js";
+import { drinksForPlate } from "./drinkPicker.js";
+import { candidatesForMeal, getPlannerDrinks, getPlannerPool } from "./plannerPool.js";
+import { buildPlates, seededRandom } from "./plateBuilder.js";
 import { buildSnacks } from "./snackBuilder.js";
 
 export const isCatalogPlannerEnabled = (env = process.env) =>
@@ -140,6 +141,29 @@ export const plateToItem = (plate, mealType) => {
       nutrients: plate.totals.nutrients,
     },
     calorie_target: plate.target,
+    // P6, 2026-11-20: up to 3 optional drinks, the first is the card's
+    // suggestion. They never change `calories`: the app adds a drink only
+    // when the user turns it on, and logs it as one more catalogue row.
+    drinks: (plate.drinks || []).map((d) => ({
+      id: d.publicId,
+      food_id: d.publicId,
+      externalId: d.publicId,
+      source: "catalog",
+      type: "drink",
+      kind: d.kind,
+      title: d.shortName,
+      food_name: d.name,
+      calories: d.kcal,
+      protein: round1(d.nutrients.protein_g),
+      carbs: round1(d.nutrients.carbohydrate_g),
+      fats: round1(d.nutrients.fat_g),
+      grams: d.grams,
+      image: d.image || "",
+      quantity: 1,
+      serving: { description: d.serving_description, grams: d.grams },
+      serving_description: d.serving_description,
+      nutrients: d.nutrients,
+    })),
     explanation: "Built from the Australian food catalogue to fit this meal's energy target.",
     behavioral_insight: "Built from the Australian food catalogue to fit this meal's energy target.",
     ml_tag: "CATALOG_PLATE_V1",
@@ -165,9 +189,13 @@ export const buildCatalogRecommendations = async ({
   eventProfile = {},
   explorationSeed,
   serveTargetsByMeal = {},
+  person = {},
   getPool = getPlannerPool,
+  getDrinks = getPlannerDrinks,
 }) => {
   const pool = await getPool({ db });
+  // P6, 2026-11-20: the drink list is loaded with the pool (same cache).
+  const drinks = await getDrinks({ db });
   const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [], snack: [] };
   const shortByMeal = {};
   let blocked = [];
@@ -199,6 +227,15 @@ export const buildCatalogRecommendations = async ({
         mains, sides, meal, targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
         serveTarget: serveTargetsByMeal[meal] || null,
       });
+    // P6, 2026-11-20: one optional drink per card (DRINKS_UI.html), with the
+    // same allergens and diets as the food. Juice on at most one card per meal.
+    const drinkRand = seededRandom(seedFor(String(seed), "drinks"));
+    const drinkPerson = { ...person, allergens: preferences.allergens || [], diets: preferences.diets || [] };
+    let juiceUsed = false;
+    for (const plate of plates) {
+      plate.drinks = drinksForPlate({ drinks, meal, plate, person: drinkPerson, rand: drinkRand, juiceUsed });
+      if (plate.drinks.some((d) => d.kind === "juice")) juiceUsed = true;
+    }
     recommendationsByMeal[meal] = plates.map((p) => plateToItem(p, meal));
     shortByMeal[meal] = shortBy;
   }

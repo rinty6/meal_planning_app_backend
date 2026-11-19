@@ -66,7 +66,10 @@ const toCentimeters = (height, unit) => {
   return unit === "ft" ? parsedHeight * 30.48 : parsedHeight;
 };
 
-const getAgeFromDateOfBirth = (dateOfBirth, today = new Date()) => {
+// Exported for the drink picker's caffeine rule (P6, 2026-11-20). It returns
+// 0 for a missing date of birth, so callers that must treat unknown as adult
+// check dateOfBirth themselves.
+export const getAgeFromDateOfBirth = (dateOfBirth, today = new Date()) => {
   if (!dateOfBirth) return 0;
   const dob = new Date(dateOfBirth);
   if (Number.isNaN(dob.getTime())) return 0;
