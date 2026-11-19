@@ -9,6 +9,7 @@ import {
   PLATES_PER_MEAL,
   bestPortion,
   buildPlates,
+  isSideWorthy,
   plateTitle,
   portionsFor,
   primaryGroup,
@@ -212,6 +213,34 @@ test("herbs, powders, wrappers and uncooked dry legumes never go on a plate", ()
   assert.equal(isPlateWorthy({ name: "Fig, dried", subgroup_code: "ausnut-168" }), true); // dried fruit is a real snack
   assert.equal(isPlateWorthy({ name: "Breadcrumbs, for coating food", subgroup_code: "ausnut-122" }), false);
   assert.equal(isPlateWorthy({ name: "Lemon peel, raw", subgroup_code: "ausnut-163" }), false);
+});
+
+test("onions and other aromatics are never a side, raw or cooked", () => {
+  assert.equal(isSideWorthy({ name: "Onion, mature, raw", group: "ausnut-248" }), false);
+  assert.equal(isSideWorthy({ name: "Onion, mature, cooked", group: "ausnut-248" }), false);
+  assert.equal(isSideWorthy({ name: "Leek, cooked", group: "ausnut-248" }), false);
+  assert.equal(isSideWorthy({ name: "Shallot, raw", group: "ausnut-248" }), false);
+});
+
+test("a raw vegetable is a side only if people normally eat it raw", () => {
+  assert.equal(isSideWorthy({ name: "Lettuce, cos, raw", group: "ausnut-244" }), true);
+  assert.equal(isSideWorthy({ name: "Tomato, roma, raw", group: "ausnut-246" }), true);
+  assert.equal(isSideWorthy({ name: "Carrot, raw", group: "ausnut-243" }), true);
+  assert.equal(isSideWorthy({ name: "Potato, peeled, raw", group: "ausnut-241" }), false);
+  assert.equal(isSideWorthy({ name: "Turnip, white, raw", group: "ausnut-243" }), false);
+  assert.equal(isSideWorthy({ name: "Pumpkin, peeled, raw", group: "ausnut-247" }), false);
+  // the cooked form stays
+  assert.equal(isSideWorthy({ name: "Turnip, white, boiled", group: "ausnut-243" }), true);
+  // fruit is not a vegetable group: raw fruit is always fine
+  assert.equal(isSideWorthy({ name: "Apple, red skin, raw", group: "ausnut-161" }), true);
+});
+
+test("an onion in the candidates never reaches a plate", () => {
+  const onion = food({ name: "Onion, mature, raw", group: "ausnut-248", kcal: 40, serves: { vegetable: 1.3 },
+    servings: [{ description: "1 onion, large (164 g)", grams: 164, isDefault: true }] });
+  const { plates } = buildPlates({ mains: Array.from({ length: 6 }, (_, i) => fish(i)), sides: [onion, veg(8), rice(8), rice(9)], meal: "lunch", targetKcal: 650, seed: 2 });
+  assert.ok(plates.length > 0);
+  assert.ok(plates.every((p) => p.items.every((i) => !i.name.startsWith("Onion"))));
 });
 
 test("a side is never the same kind of food as the main or the other side", () => {

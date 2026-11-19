@@ -69,8 +69,37 @@ const ADDED_SUGAR = /sugar sweetened|in syrup|sweetened/i;
 const LIQUID_ONLY = /juice only|syrup only|liquid only|brine only/i;
 // A side smaller than both of these is a garnish, not a side (1 cabbage leaf).
 const SIDE_MIN = Object.freeze({ grams: 60, kcal: 60 });
-// Raw is how these are normally eaten; other raw vegetables lose at dinner.
-const RAW_IS_NORMAL = new Set(["ausnut-244", "ausnut-246"]);
+
+// Which vegetables can be a side (iPhone test, 2026-11-19: "mature onion, 1
+// large, raw" was offered at lunch). Measured on the live pool: 112 of 351
+// vegetable sides were raw, including raw potato, sweet potato, cassava, taro,
+// pumpkin and eggplant.
+//   Never a side, in any form: aromatics and seasonings cooked INTO food.
+export const NEVER_A_SIDE = new Set([
+  "onion", "shallot", "spring onion", "leek", "garlic", "ginger", "chilli", "chili",
+  "herbs", "wasabi", "truffles", "lemongrass",
+]);
+//   Raw is fine only for vegetables people normally eat raw; any other raw
+//   vegetable is not a side at all (its cooked form still is).
+export const RAW_IS_NORMAL = new Set([
+  "lettuce", "tomato", "cucumber", "capsicum", "carrot", "celery", "spinach", "rocket",
+  "cabbage", "sprout", "mushroom", "avocado", "radish", "snow pea", "sugar snap pea",
+  "watercress", "chicory", "endive", "kale", "salad",
+]);
+const VEGETABLE_GROUPS = /^ausnut-24[1-9]$/;
+
+/** The kind of food: the first clause of its name ("onion", "salad", "rice"). */
+const kindOf = (food) => String(food?.name || "").split(",")[0].trim().toLowerCase();
+
+/** May this food be a side at all? (It may still be a main where the meal table allows.) */
+export const isSideWorthy = (food) => {
+  const kind = kindOf(food);
+  if (NEVER_A_SIDE.has(kind)) return false;
+  if (VEGETABLE_GROUPS.test(food?.group || "") && /\braw\b/i.test(food?.name || "") && !RAW_IS_NORMAL.has(kind)) {
+    return false;
+  }
+  return true;
+};
 const MAINS_TRIED = 60; // per request; plenty to find 5 good plates
 const SIDES_TRIED = 40; // per side slot per main
 const SERVE_COUNTS_FROM = 0.25; // a food group "is on the plate" from 1/4 serve
@@ -268,12 +297,8 @@ const sideScore = (side, meal, rand, bonusFor) => {
   const orderBonus = rank === -1 ? 0 : (order.length - rank) * 0.05;
   const preferred = PREFERRED_SIDES[meal]?.has(side.group) ? 0.3 : 0;
   const sugar = ADDED_SUGAR.test(side.name || "") ? -0.15 : 0;
-  const rawAtDinner = meal === "dinner" && /\braw\b/i.test(side.name || "") && !RAW_IS_NORMAL.has(side.group) ? -0.25 : 0;
-  return preferred + orderBonus + sugar + rawAtDinner + Math.min(bonusFor(side), 0.02) + rand() * 0.06;
+  return preferred + orderBonus + sugar + Math.min(bonusFor(side), 0.02) + rand() * 0.06;
 };
-
-/** The kind of food: the first clause of its name ("salad", "pizza", "rice"). */
-const kindOf = (food) => String(food?.name || "").split(",")[0].trim().toLowerCase();
 
 const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
   // 1. Sides, at ordinary portions.
@@ -360,7 +385,7 @@ export const buildPlates = ({
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) return { plates: [], shortBy: count };
   const rand = seededRandom(seed);
   const usableMains = mains.filter((f) => !excludeFoodIds.has(f.id));
-  const usableSides = sides.filter((f) => !excludeFoodIds.has(f.id));
+  const usableSides = sides.filter((f) => !excludeFoodIds.has(f.id) && isSideWorthy(f));
 
   const fits = (plate) => plate && Math.abs(plate.fit - 1) <= MAX_ENERGY_MISS;
   const candidates = [];
