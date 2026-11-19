@@ -93,6 +93,10 @@ export const plateToItem = (plate, mealType) => {
     source: "catalog_plate",
     food_type: "Plate",
     mealType,
+    // P2, 2026-11-20: "whole" | "needs_starch" | "meat_and_veg" | "cereal" |
+    // "toast" | "eggs" | "snack" (plateShape.js). The app labels a whole dish
+    // with one food "DISH".
+    shape: plate.shape || null,
     calories: plate.totals.kcal,
     protein: round1(n.protein_g),
     carbs: round1(n.carbohydrate_g),

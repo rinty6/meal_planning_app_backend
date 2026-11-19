@@ -39,6 +39,8 @@ const fakePool = () => [
   ...Array.from({ length: 6 }, (_, i) => food(`Fruit${i}, raw`, "ausnut-161", 55, { fruit: 1 })),
   ...Array.from({ length: 4 }, (_, i) => food(`Grain${i}, cooked`, "ausnut-121", 140, { grain: 1.3 })),
   ...Array.from({ length: 4 }, (_, i) => food(`Yoghurt${i}, natural`, "ausnut-192", 90, { dairy: 1 })),
+  // P2, 2026-11-20: an egg plate needs bread (plateShape.js), so the pool has some.
+  ...Array.from({ length: 2 }, (_, i) => food(`Bread${i}, wholemeal, toasted`, "ausnut-122", 250, { grain: 2 })),
   food("Almond, raw", "ausnut-222", 600, { protein: 1 }, { almond: 1 }),
 ];
 

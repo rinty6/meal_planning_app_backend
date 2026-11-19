@@ -5,8 +5,15 @@
 // plannerPool.candidatesForMeal and returns plates. No database, no network,
 // so it runs in milliseconds on the in-memory pool and is fully testable.
 //
+// Since P2 (2026-11-20) the main's SHAPE decides which sides it gets
+// (plateShape.js): a whole dish (burger, sandwich, pizza, soup) stands alone
+// or takes one side that goes with it; a curry gets a starch; meat gets a
+// starch and a green vegetable; cereal gets milk or yoghurt; toast gets a
+// topping; eggs get bread. Sides are still ranked by sideScore below, which
+// is why PREFERRED_SIDES and SIDE_ORDER stay.
+//
 // How a plate is built
-//   1. Choose the SIDES first, at ordinary portions: the food's default
+//   1. Choose the SIDES first, slot by slot, at ordinary portions: the food's default
 //      serving where that is within the side's energy cap (SIDE_KCAL_CAP),
 //      otherwise the portion nearest 80% of the cap. Sides come from food
 //      groups the plate does not cover yet, preferring the meal's own side
@@ -31,6 +38,8 @@
 // (mealServePattern.js, from the user's own ADG targets), sides are drawn
 // toward the groups the plate still lacks (NEED_WEIGHT) and plates earn up to
 // SERVE_WEIGHT for covering it. Without one, the old food-group count is used.
+
+import { fitsSlot, shapeFor, slotsFor } from "./plateShape.js";
 
 export const PLATES_PER_MEAL = 5; // Q1, decided 2026-11-19
 export const STEPS = Object.freeze([0.5, 1, 1.5, 2]);
@@ -351,32 +360,62 @@ const sideScore = (side, meal, rand, bonusFor, need = {}) => {
 
 const addServes = (a, b) => Object.fromEntries(ADG_GROUPS.map((g) => [g, (Number(a[g]) || 0) + (Number(b[g]) || 0)]));
 
+// P2, 2026-11-20: an optional side is added when the main would otherwise be
+// above this many of its default servings (the plate has energy to spare), or
+// when the plate still lacks more than OPTIONAL_NEED of the side's food group.
+const OPTIONAL_ROOM_SERVINGS = 1.5;
+const OPTIONAL_NEED = 0.5;
+
+/** The main's ordinary serving in grams: pool defaultGrams, else its default serving, else 100 g. */
+const mainDefaultGrams = (main) =>
+  Number(main.defaultGrams) || (main.servings || []).find((s) => s.isDefault)?.grams || 100;
+
 const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = null }) => {
-  // 1. Sides, at ordinary portions. What the plate already holds is estimated
-  //    from the main at a typical share of the meal (it is sized last), so the
-  //    sides can go where this meal's serves are still short.
+  // P2, 2026-11-20: the plate follows the main's shape (plateShape.js).
+  // Required slots are filled first; optional slots only when the plate has
+  // room. What the plate already holds is estimated from the main at a
+  // typical share of the meal (it is sized last), so sides can go where this
+  // meal's serves are still short.
+  const shape = shapeFor(main, meal);
+  const slots = slotsFor(shape, main, meal);
   const mainEstimate = bestPortion(main, target * 0.55, "main");
   let running = mainEstimate ? servesFor(main, mainEstimate.grams) : Object.fromEntries(ADG_GROUPS.map((g) => [g, 0]));
   const chosen = [];
+  // An optional side never repeats the food group of the main or of another
+  // side (no two fruits on a pancake plate); a required slot is its own role.
   const usedGroups = new Set([primaryGroup(main)]);
   const usedFoods = new Set([main.id]);
   // No caesar salad beside a caesar salad: one food of each kind per plate.
   const usedKinds = new Set([kindOf(main)]);
   const pool = shuffled(sides, rand).slice(0, SIDES_TRIED * 4);
-  for (let slot = 0; slot < MAX_SIDES; slot += 1) {
+  const perGramMain = kcalPerGram(main);
+  const ordered = [...slots.filter((s) => s.required), ...slots.filter((s) => !s.required)];
+  for (const s of ordered) {
+    if (chosen.length >= MAX_SIDES) break;
     const need = serveNeed(running, serveTarget);
+    let room = true;
+    if (!s.required) {
+      const sidesKcal = chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
+      const mainGrams = perGramMain > 0 ? (target - sidesKcal) / perGramMain : 0;
+      room = mainGrams > OPTIONAL_ROOM_SERVINGS * mainDefaultGrams(main);
+    }
     let best = null;
     for (const side of pool) {
+      if (!fitsSlot(side, s)) continue;
       if (usedFoods.has(side.id)) continue;
       if (usedKinds.has(kindOf(side))) continue;
       const g = primaryGroup(side);
-      if (usedGroups.has(g)) continue;
+      if (!s.required && !s.sameGroupOk && usedGroups.has(g)) continue;
+      if (!s.required && !room && !((need[g] || 0) > OPTIONAL_NEED)) continue;
       const portion = sidePortion(side);
       if (!portion) continue;
       const score = sideScore(side, meal, rand, bonusFor, need);
-      if (!best || score > best.score) best = { side, portion, g, score };
+      if (!best || score > best.score) best = { side, portion, g, score, required: s.required };
     }
-    if (!best) break;
+    if (!best) {
+      if (s.required) return null; // a steak with no starch is not this plate
+      continue;
+    }
     chosen.push(best);
     usedGroups.add(best.g);
     usedFoods.add(best.side.id);
@@ -384,19 +423,23 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
     running = addServes(running, servesFor(best.side, best.portion.grams));
   }
 
-  // 2. The main fills what is left. If two sides leave the main too little,
-  //    drop the second side rather than shrink the main to a garnish.
+  // 2. The main fills what is left. If the sides leave the main too little,
+  //    drop optional sides rather than shrink the main to a garnish; if the
+  //    required sides alone do that, this main cannot make this plate.
   let mainPortion = null;
-  while (chosen.length > 0) {
+  for (;;) {
     const sidesKcal = chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
     const want = target - sidesKcal;
     if (want >= target * MIN_MAIN_SHARE) {
       mainPortion = bestPortion(main, want, "main");
       break;
     }
-    chosen.pop();
+    const lastOptional = chosen.map((c) => c.required).lastIndexOf(false);
+    if (lastOptional === -1) return null;
+    chosen.splice(lastOptional, 1);
   }
-  if (!mainPortion || chosen.length === 0) return null;
+  // A whole dish alone is a plate (decision Q1); any other main needs a side.
+  if (!mainPortion || (chosen.length === 0 && shape !== "whole")) return null;
 
   const items = [itemFor(main, "main", mainPortion), ...chosen.map((c) => itemFor(c.side, "side", c.portion))];
   const unusual = [mainPortion, ...chosen.map((c) => c.portion)]
@@ -406,6 +449,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   return {
     id: `plate_${meal}_${items.map((i) => `${i.foodId}x${i.grams}`).join("_")}`,
     meal,
+    shape,
     title: plateTitle(items.map((i) => i.shortName)),
     items,
     totals,
@@ -447,7 +491,14 @@ export const buildPlates = ({
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) return { plates: [], shortBy: count };
   const rand = seededRandom(seed);
   const usableMains = mains.filter((f) => !excludeFoodIds.has(f.id));
-  const usableSides = sides.filter((f) => !excludeFoodIds.has(f.id) && isSideWorthy(f));
+  // P2, 2026-11-20: a slot may take a food the meal table allows in this meal
+  // as a main, not only as a side (an egg on toast: eggs are breakfast mains).
+  // Slots name their groups, so this only widens the toast topping and the
+  // egg plate's vegetables; the meal table still decides which foods exist
+  // in the meal at all.
+  const sideIds = new Set(sides.map((f) => f.id));
+  const slotFoods = [...sides, ...mains.filter((f) => !sideIds.has(f.id))];
+  const usableSides = slotFoods.filter((f) => !excludeFoodIds.has(f.id) && isSideWorthy(f));
 
   const fits = (plate) => plate && Math.abs(plate.fit - 1) <= MAX_ENERGY_MISS;
   const candidates = [];

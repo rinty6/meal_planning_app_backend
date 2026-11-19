@@ -59,7 +59,11 @@ const food = (name, group, kcal, serves) => ({
   servings: [{ description: "1 serve (150 g)", grams: 150, isDefault: true }], verdicts: {},
 });
 const MAIN_GROUPS = ["ausnut-151", "ausnut-183", "ausnut-181", "ausnut-206"];
-const mains = Array.from({ length: 8 }, (_, i) => food(`Main${i}, cooked`, MAIN_GROUPS[i % 4], 220, { protein: 1 }));
+// P2, 2026-11-20: mains are whole dishes ("burger" in the name), whose one
+// optional lunch side may be a salad vegetable or a yoghurt. A plain meat main
+// now always takes a starch and a green side, so it can no longer show the
+// side choice following the meal's serve need.
+const mains = Array.from({ length: 8 }, (_, i) => food(`Main${i} burger, cooked`, MAIN_GROUPS[i % 4], 220, { protein: 1 }));
 const sides = [
   ...Array.from({ length: 5 }, (_, i) => food(`Veg${i}, steamed`, "ausnut-242", 35, { vegetable: 1.3 })),
   ...Array.from({ length: 5 }, (_, i) => food(`Rice${i}, cooked`, "ausnut-121", 140, { grain: 1.3 })),
@@ -77,7 +81,7 @@ const countDairy = (serveTarget) => {
 
 test("a meal short of dairy gets a dairy side more often", () => {
   const noDairyNeeded = { vegetable: 2, fruit: 0, grain: 1.5, protein: 1, dairy: 0 };
-  const dairyNeeded = { vegetable: 2, fruit: 0, grain: 0, protein: 1, dairy: 1.5 };
+  const dairyNeeded = { vegetable: 0, fruit: 0, grain: 0, protein: 1, dairy: 1.5 };
   assert.ok(countDairy(dairyNeeded) > countDairy(noDairyNeeded), `${countDairy(dairyNeeded)} vs ${countDairy(noDairyNeeded)}`);
 });
 
