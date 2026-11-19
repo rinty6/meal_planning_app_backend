@@ -75,13 +75,29 @@ const NOT_A_QUALIFIER = new Set([
 
 const capitalise = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : text);
 
+// Qualifiers that only make sense as part of a longer phrase: "Egg, chicken"
+// is just "Egg", "Tofu, skin" is not "Skin tofu".
+const QUALIFIER_SKIP_FOR_BASE = Object.freeze({ egg: new Set(["chicken"]) });
+const NOT_A_FRONT_QUALIFIER = new Set(["skin", "pulp", "croutons", "juice", "flesh", "meat", "mixed"]);
+// Cuts and styles read after the food: "Chicken, breast" -> "Chicken breast".
+const AFTER_QUALIFIER = new Set([
+  "breast", "thigh", "drumstick", "wing", "fillet", "leg", "schnitzel", "nugget", "patty",
+  "mince", "steak", "chop", "cutlet", "sausage", "burger", "rissole", "kebab", "roll", "curry",
+]);
+
 /** "Rice, brown, cooked" -> "Brown rice". Falls back to the first clause of the name. */
 export const shortNameFor = ({ name, baseName, nameSegments } = {}) => {
-  const base = String(baseName || String(name || "").split(",")[0] || "").trim().toLowerCase();
+  const rawBase = String(baseName || String(name || "").split(",")[0] || "").trim().toLowerCase();
+  // "tofu (soy bean curd)" -> "tofu"
+  const base = rawBase.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
   if (!base) return String(name || "").trim();
   const first = String((nameSegments || [])[0] || "").trim().toLowerCase();
-  const isOneWord = first && !/\s/.test(first) && !/[()%&\d]/.test(first);
-  if (isOneWord && !NOT_A_QUALIFIER.has(first) && !base.includes(first)) {
+  const isOneWord = first && !/\s/.test(first) && !/[()%&\d/]/.test(first);
+  const skip = NOT_A_QUALIFIER.has(first) || NOT_A_FRONT_QUALIFIER.has(first) || QUALIFIER_SKIP_FOR_BASE[base]?.has(first);
+  // "Melon, watermelon" -> "Watermelon", not "Watermelon melon".
+  if (isOneWord && !skip && first.includes(base)) return capitalise(first);
+  if (isOneWord && AFTER_QUALIFIER.has(first)) return capitalise(`${base} ${first}`);
+  if (isOneWord && !skip && !base.includes(first)) {
     return capitalise(`${first} ${base}`);
   }
   return capitalise(base);
@@ -167,11 +183,35 @@ export const buildPoolSql = () => sql`
       select 1 from food_attributes fa join attributes at on at.id = fa.attribute_id
       where fa.food_id = f.id and at.slug = 'discretionary-food' and fa.value = 1)`;
 
+// Foods the servability classifier marked "servable" that are not eaten as
+// they are, found while building real plates on 2026-11-19: fresh herbs
+// ("Thyme, fresh, raw" offered as a 100 g vegetable side), powders ("Soy
+// beverage, powder") and uncooked dry legumes and grains ("Lentil, dried").
+// They stay searchable and loggable; they just never go on a plate. The real
+// fix is in tools/food_classify (checklist note on m5-01).
+const NOT_ON_A_PLATE = [
+  /^(thyme|parsley|basil|coriander|mint|chives|dill|rosemary|oregano|sage|tarragon|marjoram|lemongrass|bay leaf|garlic|ginger|chilli|chili)\b/i,
+  /\bpowder\b/i,
+  /\b(wrapper|pastry sheet)\b/i, // "Rice paper wrapper": an ingredient
+];
+const DRY_UNCOOKED = /\bdried\b/i;
+const COOKED_WORDS = /\b(boiled|cooked|canned|soaked|stewed|steamed|microwaved|baked|roasted)\b/i;
+const DRY_GROUPS = new Set(["ausnut-251", "ausnut-121"]); // legumes; grains and flours
+
+/** True when a food may go on a plate at all, whatever its group. */
+export const isPlateWorthy = (row) => {
+  const name = String(row?.name || "");
+  if (NOT_ON_A_PLATE.some((re) => re.test(name))) return false;
+  if (DRY_GROUPS.has(row?.subgroup_code) && DRY_UNCOOKED.test(name) && !COOKED_WORDS.test(name)) return false;
+  return true;
+};
+
 /** Rows -> pool, keeping only foods whose group can go on a plate. */
 export const buildPool = (rows = []) => {
   const foods = [];
   for (const row of rows) {
     if (kindFor(row.subgroup_code) !== "plate") continue;
+    if (!isPlateWorthy(row)) continue;
     const food = toPoolFood(row);
     if (food) foods.push(food);
   }
