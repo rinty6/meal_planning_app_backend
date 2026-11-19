@@ -213,6 +213,9 @@ test("herbs, powders, wrappers and uncooked dry legumes never go on a plate", ()
   assert.equal(isPlateWorthy({ name: "Fig, dried", subgroup_code: "ausnut-168" }), true); // dried fruit is a real snack
   assert.equal(isPlateWorthy({ name: "Breadcrumbs, for coating food", subgroup_code: "ausnut-122" }), false);
   assert.equal(isPlateWorthy({ name: "Lemon peel, raw", subgroup_code: "ausnut-163" }), false);
+  assert.equal(isPlateWorthy({ name: "Oats, rolled, uncooked", subgroup_code: "ausnut-121" }), false);
+  assert.equal(isPlateWorthy({ name: "Psyllium, husk, dry, uncooked", subgroup_code: "ausnut-121" }), false);
+  assert.equal(isPlateWorthy({ name: "Porridge, rolled oats, made with water", subgroup_code: "ausnut-126" }), true);
 });
 
 test("onions and other aromatics are never a side, raw or cooked", () => {

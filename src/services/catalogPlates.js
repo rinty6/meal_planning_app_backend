@@ -128,6 +128,10 @@ export const plateToItem = (plate, mealType) => {
       target: plate.target,
       fit: plate.fit,
       serves: plate.totals.serves,
+      // This meal's serve target and how much of it the plate covers (m5-03).
+      // Not shown to users (m0-06); here for m6-03 and for checking plates.
+      serve_target: plate.serveTarget,
+      serve_coverage: plate.serveCoverage === null || plate.serveCoverage === undefined ? null : Math.round(plate.serveCoverage * 100) / 100,
       nutrients: plate.totals.nutrients,
     },
     calorie_target: plate.target,
@@ -155,6 +159,7 @@ export const buildCatalogRecommendations = async ({
   favoriteTitles = [],
   eventProfile = {},
   explorationSeed,
+  serveTargetsByMeal = {},
   getPool = getPlannerPool,
 }) => {
   const pool = await getPool({ db });
@@ -180,6 +185,7 @@ export const buildCatalogRecommendations = async ({
 
     const { plates, shortBy } = buildPlates({
       mains, sides, meal, targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
+      serveTarget: serveTargetsByMeal[meal] || null,
     });
     recommendationsByMeal[meal] = plates.map((p) => plateToItem(p, meal));
     shortByMeal[meal] = shortBy;

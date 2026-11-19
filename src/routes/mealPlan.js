@@ -15,6 +15,7 @@ import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemBy
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
+import { mealServeTargets } from "../services/mealServePattern.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -861,6 +862,9 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
       dateStr,
       dailyTarget,
       targetSource: targetContext.source,
+      // Serve targets follow age, sex and pregnancy, which can change while
+      // the calorie target does not (m5-03).
+      serveRow: targetContext.serveTargets?.row || null,
       preferences,
     });
 
@@ -900,6 +904,9 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           favoriteTitles,
           eventProfile,
           explorationSeed: forceExploration ? explorationSeed || String(Date.now()) : undefined,
+          // m5-03: this user's daily ADG serves, spread over the meals by the
+          // approved meal pattern (rescaled over the 3 meals filled today).
+          serveTargetsByMeal: mealServeTargets(targetContext.serveTargets, { slots: MEAL_TYPES }),
         });
         if (catalog.blocked.length > 0) {
           console.error("[mealPlan.js] plates blocked: unrecognised preference labels", catalog.blocked);

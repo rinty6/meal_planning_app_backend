@@ -27,8 +27,10 @@
 // because the gap pulled in the most energy-dense sides. Real plates carry
 // their energy in the main; sides stay ordinary.
 //
-// Serve targets are NOT scored here yet: that is m5-03, which will add a term
-// to scorePlate. The food-group variety term is its placeholder.
+// Serve targets (m5-03, 2026-11-19): when a meal's serve target is given
+// (mealServePattern.js, from the user's own ADG targets), sides are drawn
+// toward the groups the plate still lacks (NEED_WEIGHT) and plates earn up to
+// SERVE_WEIGHT for covering it. Without one, the old food-group count is used.
 
 export const PLATES_PER_MEAL = 5; // Q1, decided 2026-11-19
 export const STEPS = Object.freeze([0.5, 1, 1.5, 2]);
@@ -281,27 +283,80 @@ const itemFor = (food, role, portion) => ({
   per100g: food.per100g,
 });
 
+// Serve targets (m5-03). How much covering this meal's serve target is worth,
+// next to energy fit (a 10% energy miss costs 0.1): a plate covering every
+// group's target earns SERVE_WEIGHT. Energy stays first because plates must
+// already sit inside MAX_ENERGY_MISS before they are scored at all.
+// When choosing a side, NEED_WEIGHT is what a food group the plate still lacks
+// is worth (compare PREFERRED_SIDES' 0.3).
+//
+// Tuned on live plates, 2026-11-19, for a woman 51-70, a man 19-50 and a
+// pregnant woman (20 seeds x 3 meals each):
+//   0.35 / 0.3   dairy 2.1-2.4 of target, energy miss 2.4-4.2%
+//   0.6  / 0.5   dairy 2.3-2.7,           energy miss 2.9-5.2%   <- chosen
+//   0.9  / 0.8   dairy 2.4-2.6,           energy miss 3.9-6.4%   (no better, less accurate)
+// What weights cannot fix is structural: three plates of at most two sides
+// fit about one dairy side per meal, so a woman 51-70 (4 dairy serves) needs
+// the snack slot (m5-04), and pregnancy's 8.5 grain serves need m5-06 to say
+// plainly when a day cannot reach them.
+export const SERVE_WEIGHT = 0.5;
+export const NEED_WEIGHT = 0.6;
+
+/**
+ * How much of a meal's serve target a plate covers, 0..1: the mean over the
+ * groups with a target of min(1, serves / target). Serves are minimums, so
+ * going over a group's target earns nothing extra and costs nothing.
+ * Null when there is no serve target to score against.
+ */
+export const serveCoverage = (serves, serveTarget) => {
+  const groups = ADG_GROUPS.filter((g) => Number(serveTarget?.[g]) > 0);
+  if (groups.length === 0) return null;
+  const sum = groups.reduce((acc, g) => acc + Math.min(1, (Number(serves?.[g]) || 0) / Number(serveTarget[g])), 0);
+  return sum / groups.length;
+};
+
 /** Higher is better. */
-export const scorePlate = ({ kcal, serves }, target, meal, personal = 0, unusualPortions = 0) => {
+export const scorePlate = ({ kcal, serves }, target, meal, personal = 0, unusualPortions = 0, serveTarget = null) => {
   const fit = Math.abs(kcal - target) / target;
-  const groups = ADG_GROUPS.filter((g) => serves[g] >= SERVE_COUNTS_FROM).length;
+  const coverage = serveCoverage(serves, serveTarget);
+  // Without a serve target, fall back to counting food groups (the pre-m5-03 placeholder).
+  const servesTerm = coverage === null
+    ? ADG_GROUPS.filter((g) => serves[g] >= SERVE_COUNTS_FROM).length * 0.05
+    : coverage * SERVE_WEIGHT;
   const vegBonus = (meal === "lunch" || meal === "dinner") && serves.vegetable >= 0.5 ? 0.1 : 0;
-  return -fit + groups * 0.05 + vegBonus - unusualPortions * 0.02 + Math.min(personal, 0.05);
+  return -fit + servesTerm + vegBonus - unusualPortions * 0.02 + Math.min(personal, 0.05);
+};
+
+/** Share of each group's target still missing, 0..1 (0 when there is no target). */
+const serveNeed = (current, serveTarget) => {
+  const need = {};
+  for (const g of ADG_GROUPS) {
+    const t = Number(serveTarget?.[g]) || 0;
+    need[g] = t > 0 ? Math.max(0, 1 - (Number(current[g]) || 0) / t) : 0;
+  }
+  return need;
 };
 
 /** How much a side suits this meal and this plate. Higher is better. */
-const sideScore = (side, meal, rand, bonusFor) => {
+const sideScore = (side, meal, rand, bonusFor, need = {}) => {
   const g = primaryGroup(side);
   const order = SIDE_ORDER[meal] || [];
   const rank = order.indexOf(g);
   const orderBonus = rank === -1 ? 0 : (order.length - rank) * 0.05;
   const preferred = PREFERRED_SIDES[meal]?.has(side.group) ? 0.3 : 0;
   const sugar = ADDED_SUGAR.test(side.name || "") ? -0.15 : 0;
-  return preferred + orderBonus + sugar + Math.min(bonusFor(side), 0.02) + rand() * 0.06;
+  const fillsGap = (need[g] || 0) * NEED_WEIGHT;
+  return preferred + orderBonus + fillsGap + sugar + Math.min(bonusFor(side), 0.02) + rand() * 0.06;
 };
 
-const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
-  // 1. Sides, at ordinary portions.
+const addServes = (a, b) => Object.fromEntries(ADG_GROUPS.map((g) => [g, (Number(a[g]) || 0) + (Number(b[g]) || 0)]));
+
+const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = null }) => {
+  // 1. Sides, at ordinary portions. What the plate already holds is estimated
+  //    from the main at a typical share of the meal (it is sized last), so the
+  //    sides can go where this meal's serves are still short.
+  const mainEstimate = bestPortion(main, target * 0.55, "main");
+  let running = mainEstimate ? servesFor(main, mainEstimate.grams) : Object.fromEntries(ADG_GROUPS.map((g) => [g, 0]));
   const chosen = [];
   const usedGroups = new Set([primaryGroup(main)]);
   const usedFoods = new Set([main.id]);
@@ -309,6 +364,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
   const usedKinds = new Set([kindOf(main)]);
   const pool = shuffled(sides, rand).slice(0, SIDES_TRIED * 4);
   for (let slot = 0; slot < MAX_SIDES; slot += 1) {
+    const need = serveNeed(running, serveTarget);
     let best = null;
     for (const side of pool) {
       if (usedFoods.has(side.id)) continue;
@@ -317,7 +373,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
       if (usedGroups.has(g)) continue;
       const portion = sidePortion(side);
       if (!portion) continue;
-      const score = sideScore(side, meal, rand, bonusFor);
+      const score = sideScore(side, meal, rand, bonusFor, need);
       if (!best || score > best.score) best = { side, portion, g, score };
     }
     if (!best) break;
@@ -325,6 +381,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
     usedGroups.add(best.g);
     usedFoods.add(best.side.id);
     usedKinds.add(kindOf(best.side));
+    running = addServes(running, servesFor(best.side, best.portion.grams));
   }
 
   // 2. The main fills what is left. If two sides leave the main too little,
@@ -354,7 +411,9 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
     totals,
     target: Math.round(target),
     fit: Math.round((totals.kcal / target) * 100) / 100,
-    score: scorePlate(totals, target, meal, personal, unusual) + rand() * 0.02,
+    serveTarget: serveTarget || null,
+    serveCoverage: serveCoverage(totals.serves, serveTarget),
+    score: scorePlate(totals, target, meal, personal, unusual, serveTarget) + rand() * 0.02,
   };
 };
 
@@ -370,6 +429,8 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor }) => {
  * @param {number}   [args.seed]     same seed, same plates; Shuffle sends a new one
  * @param {(food:{id:number})=>number} [args.bonusFor] personal tie-breaker, 0..0.05
  * @param {Set<number>} [args.excludeFoodIds] foods never to use (e.g. skipped)
+ * @param {object} [args.serveTarget] this meal's serves, { vegetable, fruit, grain, protein, dairy }
+ *        (mealServePattern.mealServeTargets). Without it plates are scored the pre-m5-03 way.
  * @returns {{ plates: object[], shortBy: number }}
  */
 export const buildPlates = ({
@@ -381,6 +442,7 @@ export const buildPlates = ({
   seed = 1,
   bonusFor = () => 0,
   excludeFoodIds = new Set(),
+  serveTarget = null,
 } = {}) => {
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) return { plates: [], shortBy: count };
   const rand = seededRandom(seed);
@@ -392,7 +454,7 @@ export const buildPlates = ({
   const mainById = new Map();
   for (const main of shuffled(usableMains, rand).slice(0, MAINS_TRIED)) {
     mainById.set(main.id, main);
-    const plate = buildOne({ main, sides: usableSides, meal, target: targetKcal, rand, bonusFor });
+    const plate = buildOne({ main, sides: usableSides, meal, target: targetKcal, rand, bonusFor, serveTarget });
     if (fits(plate)) candidates.push(plate);
   }
   candidates.sort((a, b) => b.score - a.score);
@@ -416,7 +478,7 @@ export const buildPlates = ({
       // only because its first sides were popular.
       const retry = buildOne({
         main: mainById.get(main.foodId), sides: usableSides.filter((s) => !overused(s.id)),
-        meal, target: targetKcal, rand, bonusFor,
+        meal, target: targetKcal, rand, bonusFor, serveTarget,
       });
       if (!fits(retry)) continue;
       plate = retry;

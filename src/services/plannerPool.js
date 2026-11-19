@@ -195,6 +195,7 @@ const NOT_ON_A_PLATE = [
   /\b(wrapper|pastry sheet)\b/i, // "Rice paper wrapper": an ingredient
   /^(lemon|lime)\b|\b(peel|zest|preserved lemon)\b/i, // flavourings, not a fruit serve
   /\bbreadcrumbs?\b/i, // "Breadcrumbs for coating food": an ingredient
+  /\buncooked\b|\bpsyllium\b/i, // "Oats, rolled, uncooked" offered as a dinner side (m5-03 check)
 ];
 const DRY_UNCOOKED = /\bdried\b/i;
 const COOKED_WORDS = /\b(boiled|cooked|canned|soaked|stewed|steamed|microwaved|baked|roasted)\b/i;
