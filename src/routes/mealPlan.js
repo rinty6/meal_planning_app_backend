@@ -15,8 +15,9 @@ import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemBy
 import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
-import { mealServeTargets } from "../services/mealServePattern.js";
 import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
+import { getPlannerPool } from "../services/plannerPool.js";
+import { adjustTargets, indexPoolByPublicId, readTodayLogs, summariseToday, todayFingerprint } from "../services/todayIntake.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -863,6 +864,17 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     // recommendation generation, not merely display metadata in the response.
     const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
     const dailyTarget = targetContext.dailyCalories;
+    // P5, 2026-11-20: catalogue plates plan around what is already logged
+    // today, so today's rows are read before the cache: logging a meal must
+    // change the cache key. A failed read plans as if nothing were logged.
+    let todayLogs = [];
+    if (catalogPlates) {
+      try {
+        todayLogs = await readTodayLogs({ db, userId: user.userId, dateStr });
+      } catch (logError) {
+        console.warn("[mealPlan.js] could not read today's logs; planning without them", logError?.message || logError);
+      }
+    }
     const cacheKey = JSON.stringify({
       source: catalogPlates ? "catalog_plates" : "fatsecret_v3",
       userId: user.userId,
@@ -874,6 +886,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
       // the calorie target does not (m5-03).
       serveRow: targetContext.serveTargets?.row || null,
       preferences,
+      today: catalogPlates ? todayFingerprint(todayLogs) : null,
     });
 
     if (!forceExploration) {
@@ -905,20 +918,33 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
       // path below stays untouched and is the default until plates are
       // verified on a device; then it is removed (strangler rule).
       if (catalogPlates) {
+        // P5, 2026-11-20: unlogged meals take what is left of the day's food
+        // groups, and their energy moves within 80-120% (todayIntake.js).
+        const pool = await getPlannerPool({ db });
+        const today = summariseToday(todayLogs, indexPoolByPublicId(pool));
+        const adjusted = adjustTargets({
+          mealKcal: mealTargets,
+          dailyServes: targetContext.serveTargets,
+          eaten: today,
+          loggedMeals: today.loggedMeals,
+          dailyKcal: dailyTarget,
+        });
+        const catalogMealTargets = adjusted.kcalByMeal;
         const catalog = await buildCatalogRecommendations({
           db,
           userId: user.userId,
           dateStr,
           mealTypes: mealTypesToBuild,
-          mealTargets,
+          mealTargets: catalogMealTargets,
           preferences,
           mostConsumedByMeal: mostConsumed.byMeal,
           favoriteTitles,
           eventProfile,
           explorationSeed: forceExploration ? explorationSeed || String(Date.now()) : undefined,
           // m5-03: this user's daily ADG serves, spread over the meals by the
-          // approved meal pattern; all four slots since P4 (2026-11-20).
-          serveTargetsByMeal: mealServeTargets(targetContext.serveTargets, { slots: PLATE_MEAL_TYPES }),
+          // approved meal pattern; all four slots since P4, and around today's
+          // logs since P5 (2026-11-20).
+          serveTargetsByMeal: adjusted.serveTargetsByMeal,
         });
         if (catalog.blocked.length > 0) {
           console.error("[mealPlan.js] plates blocked: unrecognised preference labels", catalog.blocked);
@@ -936,8 +962,8 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           recommendationsByMeal,
           recommendedByMeal: recommendationsByMeal,
           recommended: selectedMealType ? recommendationsByMeal[selectedMealType] : undefined,
-          meal_calorie_targets: mealTargets,
-          meal_calorie_target: selectedMealType ? mealTargets[selectedMealType] : undefined,
+          meal_calorie_targets: catalogMealTargets,
+          meal_calorie_target: selectedMealType ? catalogMealTargets[selectedMealType] : undefined,
           daily_calorie_target: dailyTarget,
           daily_calorie_target_source: targetContext.source,
           most_consumed_items: mostConsumed.all,
@@ -950,6 +976,9 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           used_safety_fallback: false,
           force_exploration_used: forceExploration,
           exploration_seed: explorationSeed || null,
+          // P5, 2026-11-20: meals whose ideas were planned around today's
+          // logs. The app shows its grey hint line on these.
+          adjusted_meals: adjusted.adjustedMeals,
           blocked_preferences: catalog.blocked,
           short_by_meal: catalog.shortByMeal,
         };
