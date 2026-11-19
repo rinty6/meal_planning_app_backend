@@ -218,6 +218,19 @@ test("herbs, powders, wrappers and uncooked dry legumes never go on a plate", ()
   assert.equal(isPlateWorthy({ name: "Porridge, rolled oats, made with water", subgroup_code: "ausnut-126" }), true);
 });
 
+test("P1: dry lentils, infant foods, evaporated milk, sweet buns, semolina and tapioca never go on a plate", () => {
+  assert.equal(isPlateWorthy({ name: "Lentil, green, hulled, dry", subgroup_code: "ausnut-251" }), false);
+  assert.equal(isPlateWorthy({ name: "Lentil, green, hulled, boiled", subgroup_code: "ausnut-251" }), true);
+  assert.equal(isPlateWorthy({ name: "Infant pasta, added Fe", subgroup_code: "ausnut-124" }), false);
+  assert.equal(isPlateWorthy({ name: "Milk, evaporated, regular fat", subgroup_code: "ausnut-191" }), false);
+  assert.equal(isPlateWorthy({ name: "Milk, sweetened condensed, regular fat", subgroup_code: "ausnut-191" }), false);
+  assert.equal(isPlateWorthy({ name: "Milk, cow, fluid, regular fat", subgroup_code: "ausnut-191" }), true);
+  assert.equal(isPlateWorthy({ name: "Panettone", subgroup_code: "ausnut-122" }), false);
+  assert.equal(isPlateWorthy({ name: "Bun, sweet, with dried fruit", subgroup_code: "ausnut-122" }), false);
+  assert.equal(isPlateWorthy({ name: "Semolina, cooked", subgroup_code: "ausnut-121" }), false);
+  assert.equal(isPlateWorthy({ name: "Tapioca, pearl, cooked", subgroup_code: "ausnut-121" }), false);
+});
+
 test("onions and other aromatics are never a side, raw or cooked", () => {
   assert.equal(isSideWorthy({ name: "Onion, mature, raw", group: "ausnut-248" }), false);
   assert.equal(isSideWorthy({ name: "Onion, mature, cooked", group: "ausnut-248" }), false);

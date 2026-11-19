@@ -196,8 +196,18 @@ const NOT_ON_A_PLATE = [
   /^(lemon|lime)\b|\b(peel|zest|preserved lemon)\b/i, // flavourings, not a fruit serve
   /\bbreadcrumbs?\b/i, // "Breadcrumbs for coating food": an ingredient
   /\buncooked\b|\bpsyllium\b/i, // "Oats, rolled, uncooked" offered as a dinner side (m5-03 check)
+  // P1, 2026-11-20: found in the 300-plate check of 2026-11-19 (HOW_AUSTRALIANS_EAT.html).
+  /^infant\b/i, // "Infant pasta, added Fe": made for babies, not for an adult's plate
+  // Evaporated and condensed milk are cooking ingredients, never a glass of
+  // milk ("Muesli + passionfruit + evaporated milk"). Limited to milk so a
+  // condensed soup is judged by its own rules.
+  /\b(evaporated|condensed)\b.*\bmilk\b|\bmilk\b.*\b(evaporated|condensed)\b/i,
+  /^panettone\b|^bun, sweet\b/i, // sweet bakery, offered as breakfast and as a side
+  /^(semolina|tapioca)\b/i, // ingredients, not sides
 ];
-const DRY_UNCOOKED = /\bdried\b/i;
+// P1, 2026-11-20: "dry" as well as "dried" ("Lentil, green, hulled, dry" got
+// past the old rule onto a dinner plate).
+const DRY_UNCOOKED = /\b(dried|dry)\b/i;
 const COOKED_WORDS = /\b(boiled|cooked|canned|soaked|stewed|steamed|microwaved|baked|roasted)\b/i;
 const DRY_GROUPS = new Set(["ausnut-251", "ausnut-121"]); // legumes; grains and flours
 
