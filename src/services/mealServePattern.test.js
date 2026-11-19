@@ -15,6 +15,16 @@ test("every food group's shares add up to the whole day", () => {
   }
 });
 
+test("P3: lunch's fruit and dairy share sits with the snack", () => {
+  assert.deepEqual({ ...MEAL_SERVE_PATTERN.fruit }, { breakfast: 0.4, lunch: 0.1, dinner: 0, snack: 0.5 });
+  assert.deepEqual({ ...MEAL_SERVE_PATTERN.dairy }, { breakfast: 0.35, lunch: 0.15, dinner: 0.15, snack: 0.35 });
+  const t = mealServeTargets(WOMAN_51_70); // 2 fruit, 4 dairy a day
+  assert.equal(t.lunch.fruit, 0.2);
+  assert.equal(t.snack.fruit, 1);
+  assert.equal(t.lunch.dairy, 0.6);
+  assert.equal(t.snack.dairy, 1.4);
+});
+
 test("no vegetables are asked of breakfast, and none of fruit at dinner", () => {
   const t = mealServeTargets(WOMAN_51_70);
   assert.equal(t.breakfast.vegetable, 0);

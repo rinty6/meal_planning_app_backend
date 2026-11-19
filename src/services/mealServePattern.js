@@ -15,6 +15,13 @@
 // pregnant woman 8.5 grain and 3.5 protein. Scoring against this pattern,
 // with each user's own daily targets, is what fixes that.
 //
+// P3, 2026-11-20: lunch's fruit and dairy share moves to the snack (user
+// decision of 2026-11-20). Australians eat their fruit at breakfast or as a
+// snack, and lunch is mostly a sandwich or a wrap (HOW_AUSTRALIANS_EAT.html).
+// Asking lunch for 35% of the day's fruit made lunch plates look like a snack
+// platter ("Hamburger + frozen strawberries + protein yoghurt"). Fruit was
+// 0.4 / 0.35 / 0 / 0.25 and dairy 0.35 / 0.25 / 0.15 / 0.25.
+//
 // The snack column is already here so m5-04 only has to turn the slot on.
 // Until then the planner fills three meals and the shares are rescaled over
 // the meals it fills, exactly as the energy split is.
@@ -23,10 +30,10 @@ import { SERVE_GROUPS } from "./adgServeTargets.js";
 export const MEAL_SERVE_PATTERN = Object.freeze({
   //            breakfast lunch dinner snack     (each row sums to 1)
   vegetable: Object.freeze({ breakfast: 0, lunch: 0.4, dinner: 0.6, snack: 0 }),
-  fruit: Object.freeze({ breakfast: 0.4, lunch: 0.35, dinner: 0, snack: 0.25 }),
+  fruit: Object.freeze({ breakfast: 0.4, lunch: 0.1, dinner: 0, snack: 0.5 }), // P3, 2026-11-20
   grain: Object.freeze({ breakfast: 0.3, lunch: 0.3, dinner: 0.35, snack: 0.05 }),
   protein: Object.freeze({ breakfast: 0.2, lunch: 0.35, dinner: 0.45, snack: 0 }),
-  dairy: Object.freeze({ breakfast: 0.35, lunch: 0.25, dinner: 0.15, snack: 0.25 }),
+  dairy: Object.freeze({ breakfast: 0.35, lunch: 0.15, dinner: 0.15, snack: 0.35 }), // P3, 2026-11-20
 });
 
 const round2 = (v) => Math.round(v * 100) / 100;
