@@ -152,3 +152,14 @@ test("plateToItem writes half portions as ½", () => {
   }, "dinner");
   assert.equal(item.items[0].serving_description, "½ × 1 fillet (150 g)");
 });
+
+test("P4: the snack slot comes back as plate items with shape snack", async () => {
+  const { recommendationsByMeal } = await run({ mealTypes: ["snack"], mealTargets: { ...targets, snack: 200 } });
+  assert.ok(recommendationsByMeal.snack.length > 0);
+  for (const item of recommendationsByMeal.snack) {
+    assert.equal(item.mealType, "snack");
+    assert.equal(item.shape, "snack");
+    assert.ok(item.items.length >= 1 && item.items.length <= 2, item.title);
+  }
+  assert.deepEqual(recommendationsByMeal.breakfast, []);
+});

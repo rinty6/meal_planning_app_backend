@@ -92,6 +92,12 @@ export const shortNameFor = ({ name, baseName, nameSegments } = {}) => {
   const base = rawBase.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
   if (!base) return String(name || "").trim();
   const first = String((nameSegments || [])[0] || "").trim().toLowerCase();
+  // P4, 2026-11-20: "Dip, hummus (hommus), commercial" is "Hummus", not
+  // "Dip": the dip's own name is what a snack card shows ("Carrot & hummus").
+  if (base === "dip" && first) {
+    const dipName = first.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+    if (dipName && !NOT_A_QUALIFIER.has(dipName)) return capitalise(dipName);
+  }
   const isOneWord = first && !/\s/.test(first) && !/[()%&\d/]/.test(first);
   const skip = NOT_A_QUALIFIER.has(first) || NOT_A_FRONT_QUALIFIER.has(first) || QUALIFIER_SKIP_FOR_BASE[base]?.has(first);
   // "Melon, watermelon" -> "Watermelon", not "Watermelon melon".

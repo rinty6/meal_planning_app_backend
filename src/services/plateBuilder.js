@@ -100,7 +100,7 @@ export const RAW_IS_NORMAL = new Set([
 const VEGETABLE_GROUPS = /^ausnut-24[1-9]$/;
 
 /** The kind of food: the first clause of its name ("onion", "salad", "rice"). */
-const kindOf = (food) => String(food?.name || "").split(",")[0].trim().toLowerCase();
+export const kindOf = (food) => String(food?.name || "").split(",")[0].trim().toLowerCase();
 
 /** May this food be a side at all? (It may still be a main where the meal table allows.) */
 export const isSideWorthy = (food) => {
@@ -131,7 +131,7 @@ export const seededRandom = (seed = 1) => {
   };
 };
 
-const shuffled = (items, rand) => {
+export const shuffled = (items, rand) => {
   const out = [...items];
   for (let i = out.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rand() * (i + 1));
@@ -141,7 +141,7 @@ const shuffled = (items, rand) => {
 };
 
 /** kcal per gram; falls back to kJ when kcal is missing. */
-const kcalPerGram = (food) => {
+export const kcalPerGram = (food) => {
   const kcal = food.per100g?.calories_kcal;
   if (Number.isFinite(kcal)) return kcal / 100;
   const kj = food.per100g?.energy_kj;
@@ -236,7 +236,7 @@ export const nutrientsFor = (food, grams) => {
   return out;
 };
 
-const servesFor = (food, grams) => {
+export const servesFor = (food, grams) => {
   const out = {};
   for (const g of ADG_GROUPS) out[g] = Math.round(((Number(food.serves100g?.[g]) || 0) * grams) / 100 * 100) / 100;
   return out;
@@ -273,7 +273,7 @@ export const sumPlate = (items) => {
   return { nutrients, serves, kcal: Math.round(kcal) };
 };
 
-const itemFor = (food, role, portion) => ({
+export const itemFor = (food, role, portion) => ({
   foodId: food.id,
   publicId: food.publicId,
   name: food.name,

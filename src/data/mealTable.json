@@ -2,6 +2,9 @@
  "status": "APPROVED by the user 2026-11-19 (checklist m5-01, decision D2). Edit via claude_memory/.../src/build_meal_table.py, then copy here.",
  "generated": "2026-11-19",
  "roles": "main | side | main/side | null per meal; kind = plate | drink | never",
+ "changes": [
+  "2026-11-20 (task P4, user decision D1 in SNACK_SLOT_DESIGN.html): snack set to null for 133 cakes and scones, 169 fruit dishes, 196 custards, 197 dairy desserts, 262 corn snacks and 282 fruit and nut confectionery; snack set to main for the raw vegetable groups 243, 244, 245, 246 and 247 (only raw vegetables people eat raw qualify, in snackBuilder.js). 132 crackers and 235 dips stay but are pair-only. Made on the Pi in the backend copy; build_meal_table.py on the laptop still has to be synced."
+ ],
  "rows": [
   {
    "code": "ausnut-111",
@@ -214,7 +217,7 @@
    "breakfast": null,
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "Only 7 everyday items, mostly plain or cheese scones.",
    "review": true
@@ -454,7 +457,7 @@
    "breakfast": "main",
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "Acai bowl, baked fruit. 4 everyday items.",
    "review": true
@@ -670,7 +673,7 @@
    "breakfast": null,
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "7 everyday custards.",
    "review": true
@@ -682,7 +685,7 @@
    "breakfast": null,
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "7 everyday dairy desserts.",
    "review": true
@@ -910,7 +913,7 @@
    "breakfast": null,
    "lunch": "side",
    "dinner": "side",
-   "snack": null,
+   "snack": "main",
    "kind": "plate",
    "note": "Carrot and root vegetables.",
    "review": false
@@ -922,7 +925,7 @@
    "breakfast": null,
    "lunch": "side",
    "dinner": "side",
-   "snack": null,
+   "snack": "main",
    "kind": "plate",
    "note": "Lettuce, celery, spinach.",
    "review": false
@@ -934,7 +937,7 @@
    "breakfast": null,
    "lunch": "side",
    "dinner": "side",
-   "snack": null,
+   "snack": "main",
    "kind": "plate",
    "note": "Peas and beans.",
    "review": false
@@ -946,7 +949,7 @@
    "breakfast": null,
    "lunch": "side",
    "dinner": "side",
-   "snack": null,
+   "snack": "main",
    "kind": "plate",
    "note": "Tomato.",
    "review": false
@@ -958,7 +961,7 @@
    "breakfast": null,
    "lunch": "side",
    "dinner": "side",
-   "snack": null,
+   "snack": "main",
    "kind": "plate",
    "note": "Corn, capsicum, zucchini, eggplant.",
    "review": false
@@ -1030,7 +1033,7 @@
    "breakfast": null,
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "Only plain air-popped popcorn is everyday.",
    "review": true
@@ -1090,7 +1093,7 @@
    "breakfast": null,
    "lunch": null,
    "dinner": null,
-   "snack": "main",
+   "snack": null,
    "kind": "plate",
    "note": "Only the 100% fruit bar is everyday.",
    "review": true

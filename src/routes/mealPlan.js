@@ -16,6 +16,7 @@ import { getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js"
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { mealServeTargets } from "../services/mealServePattern.js";
+import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
@@ -38,6 +39,9 @@ const ALLOWED_MEAL_PLAN_ALLERGENS = [
 const ALLOWED_MEAL_PLAN_DIETS = ["Vegan", "Vegetarian"];
 
 const MEAL_TYPES = ["breakfast", "lunch", "dinner"];
+// P4, 2026-11-20: catalogue plates also plan the snack (m5-04). The FatSecret
+// path keeps its three meals (MEAL_TYPES) until it is removed.
+const PLATE_MEAL_TYPES = ALL_MEAL_TYPES;
 const ALLOWED_EVENT_TYPES = new Set([
   "shown",
   "selected",
@@ -234,9 +238,11 @@ const getUserByClerkId = async (clerkId) => {
   return users.length > 0 ? users[0] : null;
 };
 
+// P4, 2026-11-20: accepts "snack" too, so snack plates can be requested and
+// their picks recorded. The FatSecret path drops "snack" in the handler.
 const normalizeMealType = (value) => {
   const mealType = normalizeKey(value);
-  return MEAL_TYPES.includes(mealType) ? mealType : null;
+  return PLATE_MEAL_TYPES.includes(mealType) ? mealType : null;
 };
 
 const normalizeAllowedLabel = (value, allowedValues) => {
@@ -764,7 +770,7 @@ const recordEvents = async ({ user, clerkId, eventType, mealType, items, payload
 
 const recordShownEvents = ({ user, clerkId, recommendationsByMeal, preferences }) => {
   const rows = [];
-  for (const mealType of MEAL_TYPES) {
+  for (const mealType of PLATE_MEAL_TYPES) {
     for (const item of ensureArray(recommendationsByMeal?.[mealType])) {
       rows.push({
         ...item,
@@ -841,7 +847,12 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     const { clerkId } = req.params;
     const user = req.dbUser;
 
-    const selectedMealType = normalizeMealType(req.query.mealType);
+    // Read per request, so changing MEAL_PLAN_SOURCE on Railway takes effect
+    // on the restart that applies it, and the two sources never share a cache entry.
+    const catalogPlates = isCatalogPlannerEnabled();
+    const requestedMealType = normalizeMealType(req.query.mealType);
+    // The FatSecret path has no snack slot: a snack request there gets the three meals.
+    const selectedMealType = !catalogPlates && requestedMealType === "snack" ? null : requestedMealType;
     const forceExploration = parseBool(req.query.force_exploration) || parseBool(req.query.forceExploration);
     const explorationSeed = normalizeWhitespace(req.query.exploration_seed || req.query.explorationSeed);
     const dateStr = normalizeDateString(req.query.date);
@@ -852,9 +863,6 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
     // recommendation generation, not merely display metadata in the response.
     const targetContext = await getDailyCalorieTargetContext({ db, userId: user.userId, dateStr });
     const dailyTarget = targetContext.dailyCalories;
-    // Read per request, so changing MEAL_PLAN_SOURCE on Railway takes effect
-    // on the restart that applies it, and the two sources never share a cache entry.
-    const catalogPlates = isCatalogPlannerEnabled();
     const cacheKey = JSON.stringify({
       source: catalogPlates ? "catalog_plates" : "fatsecret_v3",
       userId: user.userId,
@@ -886,8 +894,12 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
         getEventProfile(user.userId),
       ]);
 
-      const mealTargets = buildMealTargets(dailyTarget);
-      const mealTypesToBuild = selectedMealType ? [selectedMealType] : MEAL_TYPES;
+      // P4, 2026-11-20: with the snack planned, the split applies exactly
+      // (25/30/35/10) instead of spreading the snack's share over three meals.
+      const mealTargets = catalogPlates
+        ? buildMealCalorieTargets(dailyTarget, { slots: PLATE_MEAL_TYPES })
+        : buildMealTargets(dailyTarget);
+      const mealTypesToBuild = selectedMealType ? [selectedMealType] : catalogPlates ? PLATE_MEAL_TYPES : MEAL_TYPES;
 
       // m5-01: catalogue plates, behind MEAL_PLAN_SOURCE=catalog. The FatSecret
       // path below stays untouched and is the default until plates are
@@ -905,8 +917,8 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           eventProfile,
           explorationSeed: forceExploration ? explorationSeed || String(Date.now()) : undefined,
           // m5-03: this user's daily ADG serves, spread over the meals by the
-          // approved meal pattern (rescaled over the 3 meals filled today).
-          serveTargetsByMeal: mealServeTargets(targetContext.serveTargets, { slots: MEAL_TYPES }),
+          // approved meal pattern; all four slots since P4 (2026-11-20).
+          serveTargetsByMeal: mealServeTargets(targetContext.serveTargets, { slots: PLATE_MEAL_TYPES }),
         });
         if (catalog.blocked.length > 0) {
           console.error("[mealPlan.js] plates blocked: unrecognised preference labels", catalog.blocked);

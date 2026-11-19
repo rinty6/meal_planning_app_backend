@@ -16,6 +16,7 @@
 // fits the target better.
 import { candidatesForMeal, getPlannerPool } from "./plannerPool.js";
 import { buildPlates } from "./plateBuilder.js";
+import { buildSnacks } from "./snackBuilder.js";
 
 export const isCatalogPlannerEnabled = (env = process.env) =>
   String(env.MEAL_PLAN_SOURCE || "").trim().toLowerCase() === "catalog";
@@ -167,7 +168,7 @@ export const buildCatalogRecommendations = async ({
   getPool = getPlannerPool,
 }) => {
   const pool = await getPool({ db });
-  const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [] };
+  const recommendationsByMeal = { breakfast: [], lunch: [], dinner: [], snack: [] };
   const shortByMeal = {};
   let blocked = [];
 
@@ -187,16 +188,23 @@ export const buildCatalogRecommendations = async ({
     const excludeFoodIds = new Set([...mains, ...sides].filter(isSkipped).map((f) => f.id));
     const seed = explorationSeed ? seedFor(String(explorationSeed), meal) : seedFor(String(userId), dateStr, meal);
 
-    const { plates, shortBy } = buildPlates({
-      mains, sides, meal, targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
-      serveTarget: serveTargetsByMeal[meal] || null,
-    });
+    // P4, 2026-11-20: the snack slot has its own builder (one food or a pair);
+    // its result has the same shape as plates.
+    const { plates, shortBy } = meal === "snack"
+      ? buildSnacks({
+        foods: [...mains, ...sides], targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
+        serveTarget: serveTargetsByMeal[meal] || null,
+      })
+      : buildPlates({
+        mains, sides, meal, targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
+        serveTarget: serveTargetsByMeal[meal] || null,
+      });
     recommendationsByMeal[meal] = plates.map((p) => plateToItem(p, meal));
     shortByMeal[meal] = shortBy;
   }
 
   if (blocked.length > 0) {
-    return { recommendationsByMeal: { breakfast: [], lunch: [], dinner: [] }, blocked, shortByMeal: {} };
+    return { recommendationsByMeal: { breakfast: [], lunch: [], dinner: [], snack: [] }, blocked, shortByMeal: {} };
   }
   return { recommendationsByMeal, blocked, shortByMeal };
 };
