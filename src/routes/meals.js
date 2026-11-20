@@ -11,6 +11,7 @@ import { getCalorieTargetBand, resolveCalorieZone } from "../services/calorieTar
 import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { MEAL_TYPES } from "../services/mealTypes.js";
+import { scaleNutrients } from "../services/mealLogNutrients.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 import { formatEnergyKj } from "../utils/energy.js";
 
@@ -300,6 +301,21 @@ mealRoutes.put("/update/:id", requireClerkAuth, attachUserFromAuth, async (req, 
     };
     if (servingDescription !== undefined) {
       updateValues.servingDescription = servingDescription ? String(servingDescription) : null;
+    }
+
+    // T1, 2026-11-21 (m4-11): nutrients are totals for the row's servings, so
+    // a +/- rescales them too. Read the row first, with the same user check as
+    // the update; a missing row or another user's row is still a 404.
+    const [current] = await db
+      .select({ servings: mealLogsTable.servings, nutrients: mealLogsTable.nutrients })
+      .from(mealLogsTable)
+      .where(and(eq(mealLogsTable.id, id), eq(mealLogsTable.userId, req.dbUser.userId)))
+      .limit(1);
+    if (!current) {
+      return res.status(404).json({ error: "Meal not found" });
+    }
+    if (current.nutrients) {
+      updateValues.nutrients = scaleNutrients(current.nutrients, current.servings, safeServings);
     }
 
     const updated = await db
