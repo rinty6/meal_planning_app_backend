@@ -95,7 +95,9 @@ export const summariseToday = (logs = [], poolByPublicId = new Map()) => {
  * @param {{ eatenKcal: number, eatenServes: object }} args.eaten  from summariseToday
  * @param {Set<string>} args.loggedMeals
  * @param {number} [args.dailyKcal]                 the day's target; defaults to the sum of mealKcal
- * @returns {{ kcalByMeal: Record<string, number>, serveTargetsByMeal: object, adjustedMeals: string[] }}
+ * @returns {{ kcalByMeal: Record<string, number>, serveTargetsByMeal: object, adjustedMeals: string[], energyFactor: number|null }}
+ *   energyFactor is the factor BEFORE ENERGY_CLAMP (T4, 2026-11-21), so a
+ *   caller can tell when the 80% floor was hit; null when nothing was adjusted.
  */
 export const adjustTargets = ({ mealKcal = {}, dailyServes = {}, eaten = {}, loggedMeals = new Set(), dailyKcal } = {}) => {
   const slots = Object.keys(mealKcal);
@@ -105,14 +107,17 @@ export const adjustTargets = ({ mealKcal = {}, dailyServes = {}, eaten = {}, log
   const somethingLogged = loggedMeals.size > 0 || eatenKcal > 0;
   const unlogged = slots.filter((m) => !loggedMeals.has(m));
   if (!somethingLogged || unlogged.length === 0) {
-    return { kcalByMeal, serveTargetsByMeal: normalServes, adjustedMeals: [] };
+    return { kcalByMeal, serveTargetsByMeal: normalServes, adjustedMeals: [], energyFactor: null };
   }
 
   const daily = Number.isFinite(Number(dailyKcal)) && Number(dailyKcal) > 0
     ? Number(dailyKcal)
     : slots.reduce((sum, m) => sum + (Number(mealKcal[m]) || 0), 0);
   const usualUnlogged = unlogged.reduce((sum, m) => sum + (Number(mealKcal[m]) || 0), 0);
-  const factor = usualUnlogged > 0 ? clamp((daily - eatenKcal) / usualUnlogged, ENERGY_CLAMP.min, ENERGY_CLAMP.max) : 1;
+  // T4, 2026-11-21 (m5-06): the unclamped factor is returned too, so plan
+  // notes can say the day is already over its energy.
+  const energyFactor = usualUnlogged > 0 ? (daily - eatenKcal) / usualUnlogged : null;
+  const factor = energyFactor === null ? 1 : clamp(energyFactor, ENERGY_CLAMP.min, ENERGY_CLAMP.max);
   for (const m of unlogged) kcalByMeal[m] = Math.round((Number(mealKcal[m]) || 0) * factor);
 
   const left = Object.fromEntries(SERVE_GROUPS.map((g) => [
@@ -120,5 +125,10 @@ export const adjustTargets = ({ mealKcal = {}, dailyServes = {}, eaten = {}, log
   ]));
   const unloggedServes = mealServeTargets(left, { slots: unlogged });
   const serveTargetsByMeal = { ...normalServes, ...unloggedServes };
-  return { kcalByMeal, serveTargetsByMeal, adjustedMeals: unlogged };
+  return {
+    kcalByMeal,
+    serveTargetsByMeal,
+    adjustedMeals: unlogged,
+    energyFactor: energyFactor === null ? null : Math.round(energyFactor * 1000) / 1000,
+  };
 };

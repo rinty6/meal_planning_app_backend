@@ -117,3 +117,9 @@ test("today's logs are one query", async () => {
   assert.deepEqual(calls.map(([name]) => name), ["select", "from", "where"]);
   assert.deepEqual(Object.keys(calls[0][1]).sort(), ["calories", "externalId", "mealType", "source"]);
 });
+
+test("T4: energyFactor is the factor before the clamp", () => {
+  assert.equal(plan([{ mealType: "breakfast", calories: 1100, externalId: null, source: "barcode" }]).energyFactor, 0.6);
+  assert.equal(plan([{ mealType: "breakfast", calories: 800, externalId: null, source: "barcode" }]).energyFactor, 0.8);
+  assert.equal(plan([]).energyFactor, null);
+});

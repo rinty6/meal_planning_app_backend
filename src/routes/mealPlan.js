@@ -17,6 +17,7 @@ import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { addPlateEventFoodIds, buildCatalogRecommendations, eventPayloadFor, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
 import { getPlannerPool } from "../services/plannerPool.js";
+import { planNotes } from "../services/planNotes.js";
 import { adjustTargets, indexPoolByPublicId, readTodayLogs, summariseToday, todayFingerprint } from "../services/todayIntake.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { createTtlCache } from "../utils/ttlCache.js";
@@ -992,6 +993,18 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
           adjusted_meals: adjusted.adjustedMeals,
           blocked_preferences: catalog.blocked,
           short_by_meal: catalog.shortByMeal,
+          // T4, 2026-11-21 (m5-06): the constraints this plan cannot meet, by
+          // code (planNotes.js). No screen shows them yet (m6-07).
+          plan_notes: planNotes({
+            recommendationsByMeal,
+            shortByMeal: catalog.shortByMeal,
+            blocked: catalog.blocked,
+            dailyServes: targetContext.serveTargets,
+            eatenServes: today.eatenServes,
+            energyFactor: adjusted.energyFactor,
+            builtAllMeals: !selectedMealType,
+            loggedMeals: today.loggedMeals,
+          }),
         };
         if (!forceExploration) {
           recommendationCache.set(cacheKey, catalogPayload);
