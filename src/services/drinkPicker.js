@@ -9,7 +9,7 @@
 // drink with energy is offered only when the plate leaves room for it.
 import { evaluateFood, normalizeAllergens, normalizeDiets } from "./foodAttributeFilter.js";
 import { mapPlannerAllergens } from "./plannerPool.js";
-import { nutrientsFor, shuffled } from "./plateBuilder.js";
+import { MAX_ENERGY_MISS, nutrientsFor, shuffled } from "./plateBuilder.js";
 
 // P6, 2026-11-20: every drink is offered at 250 ml (1 ml taken as 1 g), the
 // portion DRINKS_UI.html shows for each kind.
@@ -23,6 +23,11 @@ const PORTION_TEXT = Object.freeze({
 });
 // P6, 2026-11-20: "a drink over 40 kcal is offered only on a plate at or below
 // 95% of its energy target" (DRINKS_UI rules).
+// Live review, 2026-11-20: that rule removed almost every flat white and juice,
+// because most plates sit near 100% of their target; breakfast offered only
+// water and tea. Now a drink with energy is offered when the plate WITH the
+// drink still stays inside the planner's own window (MAX_ENERGY_MISS, ±25%).
+// DRINK_ROOM_FIT is the fallback for a plate that carries no kcal/target.
 export const DRINK_KCAL_FREE = 40;
 export const DRINK_ROOM_FIT = 0.95;
 // P6, 2026-11-20: no coffee under 18 (DRINKS_UI rules, caffeine).
@@ -136,7 +141,11 @@ export const drinksForPlate = ({ drinks = [], meal, plate, person = {}, rand = M
   const age = Number.isFinite(Number(person.age)) && person.age !== null ? Number(person.age) : null;
   const minor = age !== null && age < MIN_COFFEE_AGE;
   const caffeineLimited = !!(person.isPregnant || person.isBreastfeeding);
-  const roomForEnergy = Number(plate?.fit) <= DRINK_ROOM_FIT;
+  const plateKcal = Number(plate?.totals?.kcal);
+  const plateTarget = Number(plate?.target);
+  const roomFor = (kcal) => (Number.isFinite(plateKcal) && plateTarget > 0
+    ? (plateKcal + kcal) / plateTarget <= 1 + MAX_ENERGY_MISS
+    : Number(plate?.fit) <= DRINK_ROOM_FIT);
 
   // A glass of milk is not offered beside a snack that already is one.
   const onPlate = new Set((plate?.items || []).map((i) => i.foodId));
@@ -150,10 +159,13 @@ export const drinksForPlate = ({ drinks = [], meal, plate, person = {}, rand = M
     if (coffee && minor) continue;
     // Pregnancy or breastfeeding: coffee at breakfast only, decaf elsewhere.
     if (coffee && caffeineLimited && meal !== "breakfast" && !isDecaf(name)) continue;
+    // Live review, 2026-11-20: decaf was offered to everyone ("Decaf long
+    // black" for a 30-year-old). It is only the stand-in for the rule above.
+    if (coffee && !caffeineLimited && isDecaf(name)) continue;
     if (kind === "milk_coffee" && meal === "breakfast" && !isCowOrSoy(name)) continue;
     if (kind === "juice" && juiceUsed) continue;
     const option = toOption(food, kind);
-    if (option.kcal > DRINK_KCAL_FREE && !roomForEnergy) continue;
+    if (option.kcal > DRINK_KCAL_FREE && !roomFor(option.kcal)) continue;
     if (!evaluateFood(food.verdicts || {}, { allergens: mapped, diets: person.diets || [], strictness: person.strictness || {} }).passes) continue;
     if (!byKind.has(kind)) byKind.set(kind, []);
     byKind.get(kind).push(option);

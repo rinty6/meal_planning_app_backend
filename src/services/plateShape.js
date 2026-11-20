@@ -25,7 +25,9 @@ export const SHAPES = Object.freeze(["whole", "needs_starch", "meat_and_veg", "c
 export const WHOLE_BY_NAME =
   /\bsandwich|\broll\b|burger|wrap\b|pizza|\bbowl\b|sushi|lasagne|risotto|paella|fried rice|kebab|taco|burrito|nachos|\bpie\b|with (rice|noodles|pasta|potato|mash|chips|bread|toast|english muffin)\b/i;
 // P2, 2026-11-20: a salad with a protein in it is a meal ("Salad, chicken caesar").
-const PROTEIN_SALAD = /^salad\b.*\b(chicken|beef|lamb|pork|tuna|salmon|prawn|egg|tofu|lentil|chickpea|haloumi|feta)\b/i;
+// Bacon and ham added in the live review of 2026-11-20 ("Salad, garden, added
+// bacon" was offered as a dinner side).
+const PROTEIN_SALAD = /^salad\b.*\b(chicken|beef|lamb|pork|bacon|ham|tuna|salmon|prawn|egg|tofu|lentil|chickpea|haloumi|feta)\b/i;
 // P2, 2026-11-20: dishes eaten over a starch, when no starch is in the name.
 // "stew" is matched as a word so stewed fruit ("Apple, stewed") is not a stew.
 const NEEDS_STARCH_BY_NAME = /curry|stir-?fry|casserole|\bstews?\b|goulash|chilli con carne|bolognai?se/i;
@@ -46,12 +48,29 @@ const EGG_GROUPS = groups(171, 172);
 const CEREAL_GROUPS = groups(125, 126, 192, 205, 169);
 const TOAST_GROUPS = groups(122, 123, 136);
 const DAIRY_MAIN_GROUPS = groups(192, 205); // yoghurt is already the dairy
+// Live review, 2026-11-20: porridge "made with cow's milk" was given a glass of
+// cashew milk as well. A cereal cooked or served in milk has its dairy already.
+const MADE_WITH_MILK = /\b(made with|with)\b[^,]*\b(milk|dairy)\b/i;
 
 /**
- * The shape of a main food in a meal.
+ * Not a side, whatever slot asks (live review, 2026-11-20). A poke bowl was
+ * offered as the "green" side of a salad, and chicken caesar beside a pizza:
+ * a whole dish or a salad with meat in it is a meal of its own.
+ */
+export const isWholeDish = (food) => {
+  const name = String(food?.name || "");
+  const group = String(food?.group || "");
+  if (WHOLE_GROUPS.has(group)) return true;
+  if (!PLAIN_BREAD_GROUPS.has(group) && WHOLE_BY_NAME.test(name)) return true;
+  return PROTEIN_SALAD.test(name);
+};
+
+/**
+ * The shape of a main food in a meal, or null when the food is not a main at
+ * all in that meal.
  * @param {{ name: string, group: string }} food  a pool food
  * @param {string} meal  "breakfast" | "lunch" | "dinner" | "snack"
- * @returns {string} one of SHAPES
+ * @returns {string|null} one of SHAPES, or null
  */
 export const shapeFor = (food, meal) => {
   if (meal === "snack") return "snack"; // snacks are built by snackBuilder (P4)
@@ -61,6 +80,10 @@ export const shapeFor = (food, meal) => {
   if (!PLAIN_BREAD_GROUPS.has(group) && WHOLE_BY_NAME.test(name)) return "whole";
   if (group === "ausnut-249" && PROTEIN_SALAD.test(name)) return "whole";
   if (NEEDS_STARCH_BY_NAME.test(name) || NEEDS_STARCH_GROUPS.has(group)) return "needs_starch";
+  // Live review, 2026-11-20: any other vegetable dish (a garden salad, a
+  // stuffed mushroom, a zucchini fritter) was planned like a steak, with a
+  // starch and a green vegetable. It is a side, not a main.
+  if (group === "ausnut-249") return null;
   if (meal === "breakfast") {
     if (CEREAL_GROUPS.has(group)) return "cereal";
     if (TOAST_GROUPS.has(group)) return "toast";
@@ -82,7 +105,11 @@ const FRUIT = groups(range(161, 168));
 const GREEN = groups(242, range(244, 249));
 const slot = (name, required, codes, extra = {}) => Object.freeze({ name, required, groups: codes, ...extra });
 
-const STARCH_FOR_CURRY = slot("starch", true, groups(121, 124, 123, 241));
+// Live review, 2026-11-20: "Stir-fry + injera" and "Curry + tortilla" came
+// up. Of the flat breads (123) only those eaten with a curry or a stew count.
+const STARCH_FOR_CURRY = slot("starch", true, groups(121, 124, 123, 241), {
+  only: (food) => food.group !== "ausnut-123" || /\b(naan|roti|paratha|chapati|pita|turkish)\b/i.test(food.name || ""),
+});
 const GREEN_OPTIONAL = slot("green", false, GREEN, { sameGroupOk: true });
 // 243 holds root vegetables; only sweet potato and pumpkin stand in for a starch.
 const STARCH_FOR_MEAT = slot("starch", true, groups(241, 121, 124, 122, 123, 243), {
@@ -130,7 +157,7 @@ export const slotsFor = (shape, main, meal) => {
     case "meat_and_veg":
       return [STARCH_FOR_MEAT, GREEN_REQUIRED];
     case "cereal":
-      return DAIRY_MAIN_GROUPS.has(main?.group)
+      return DAIRY_MAIN_GROUPS.has(main?.group) || MADE_WITH_MILK.test(String(main?.name || ""))
         ? [FRUIT_OPTIONAL]
         : [slot("dairy", true, groups(191, 192, 201, 205)), FRUIT_OPTIONAL];
     case "toast":
@@ -143,4 +170,4 @@ export const slotsFor = (shape, main, meal) => {
 };
 
 /** Does a food fit a slot? */
-export const fitsSlot = (food, s) => s.groups.has(food?.group) && (!s.only || s.only(food));
+export const fitsSlot = (food, s) => s.groups.has(food?.group) && (!s.only || s.only(food)) && !isWholeDish(food);

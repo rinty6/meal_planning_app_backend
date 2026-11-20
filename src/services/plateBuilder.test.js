@@ -231,6 +231,13 @@ test("P1: dry lentils, infant foods, evaporated milk, sweet buns, semolina and t
   assert.equal(isPlateWorthy({ name: "Tapioca, pearl, cooked", subgroup_code: "ausnut-121" }), false);
 });
 
+test("the liquid left in a can is never a food (live review, 2026-11-20)", () => {
+  assert.equal(isPlateWorthy({ name: "Apricot, canned in pear juice, juice only", subgroup_code: "ausnut-164" }), false);
+  assert.equal(isPlateWorthy({ name: "Peach, canned in syrup, syrup only", subgroup_code: "ausnut-164" }), false);
+  assert.equal(isPlateWorthy({ name: "Apricot, canned in pear juice, drained", subgroup_code: "ausnut-164" }), true);
+  assert.equal(isPlateWorthy({ name: "Babyccino, from cow's milk", subgroup_code: "ausnut-191" }), false);
+});
+
 test("onions and other aromatics are never a side, raw or cooked", () => {
   assert.equal(isSideWorthy({ name: "Onion, mature, raw", group: "ausnut-248" }), false);
   assert.equal(isSideWorthy({ name: "Onion, mature, cooked", group: "ausnut-248" }), false);

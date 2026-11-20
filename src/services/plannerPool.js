@@ -210,6 +210,11 @@ const NOT_ON_A_PLATE = [
   /\b(evaporated|condensed)\b.*\bmilk\b|\bmilk\b.*\b(evaporated|condensed)\b/i,
   /^panettone\b|^bun, sweet\b/i, // sweet bakery, offered as breakfast and as a side
   /^(semolina|tapioca)\b/i, // ingredients, not sides
+  // Live review, 2026-11-20: "Apricot, canned in pear juice, juice only" is the
+  // liquid left in the can, offered as a snack. plateBuilder already kept it
+  // off sides (LIQUID_ONLY); this keeps it out of every builder.
+  /\b(juice|syrup|liquid|brine) only\b/i,
+  /\bbabyccino\b/i, // milk froth for children, offered as a cereal's milk (live review, 2026-11-20)
 ];
 // P1, 2026-11-20: "dry" as well as "dried" ("Lentil, green, hulled, dry" got
 // past the old rule onto a dinner plate).

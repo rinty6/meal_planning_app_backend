@@ -87,6 +87,28 @@ test("no coffee for a 16-year-old; unknown age counts as an adult", () => {
   assert.ok(offered({ meal: "breakfast", person: {} }).some(isCoffee));
 });
 
+// ---- live review fixes, 2026-11-20 ------------------------------------------------
+
+test("decaf is only offered when caffeine is limited", () => {
+  for (const meal of ["breakfast", "lunch", "snack"]) {
+    const coffees = offered({ meal, person: ADULT }).filter(isCoffee);
+    assert.ok(coffees.length > 0, meal);
+    assert.ok(coffees.every((n) => !/decaf/i.test(n)), `${meal}: ${coffees.join(" | ")}`);
+  }
+});
+
+test("a drink with energy is offered when the plate with the drink stays within the ±25% window", () => {
+  // A breakfast plate right on its 500 kcal target: a 118 kcal flat white keeps it at 1.24.
+  const onTarget = { totals: { kcal: 500 }, target: 500, fit: 1 };
+  assert.ok(offered({ meal: "breakfast", plate: onTarget }).some((n) => /flat white|juice|^milk/i.test(n)));
+  // A plate already at 1.2: nothing over 40 kcal fits.
+  const over = { totals: { kcal: 600 }, target: 500, fit: 1.2 };
+  for (let seed = 1; seed <= 20; seed++) {
+    const options = drinksForPlate({ drinks: DRINKS, meal: "breakfast", plate: over, person: ADULT, rand: seededRandom(seed) });
+    assert.ok(options.every((d) => d.kcal <= DRINK_KCAL_FREE), options.map((d) => d.name).join(" | "));
+  }
+});
+
 test("pregnant: coffee at breakfast, decaf only at lunch and snack", () => {
   const pregnant = { age: 30, isPregnant: true };
   assert.ok(offered({ meal: "breakfast", person: pregnant }).some((n) => isCoffee(n) && !/decaf/i.test(n)));

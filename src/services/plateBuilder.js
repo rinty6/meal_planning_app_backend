@@ -377,6 +377,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   // typical share of the meal (it is sized last), so sides can go where this
   // meal's serves are still short.
   const shape = shapeFor(main, meal);
+  if (!shape) return null; // a vegetable dish is a side, not a main (live review, 2026-11-20)
   const slots = slotsFor(shape, main, meal);
   const mainEstimate = bestPortion(main, target * 0.55, "main");
   let running = mainEstimate ? servesFor(main, mainEstimate.grams) : Object.fromEntries(ADG_GROUPS.map((g) => [g, 0]));
