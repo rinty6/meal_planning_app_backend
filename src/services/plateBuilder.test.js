@@ -238,6 +238,15 @@ test("the liquid left in a can is never a food (live review, 2026-11-20)", () =>
   assert.equal(isPlateWorthy({ name: "Babyccino, from cow's milk", subgroup_code: "ausnut-191" }), false);
 });
 
+test("T2: egg yolk and egg white alone never go on a plate; a whole egg does", () => {
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, yolk, raw", subgroup_code: "ausnut-171" }), false);
+  assert.equal(isPlateWorthy({ name: "Egg white, chicken, raw", subgroup_code: "ausnut-171" }), false);
+  assert.equal(isPlateWorthy({ name: "Albumen, egg, dried", subgroup_code: "ausnut-171" }), false);
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, white only, boiled", subgroup_code: "ausnut-171" }), false);
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, whole, boiled", subgroup_code: "ausnut-171" }), true);
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, whole, poached", subgroup_code: "ausnut-171" }), true);
+});
+
 test("onions and other aromatics are never a side, raw or cooked", () => {
   assert.equal(isSideWorthy({ name: "Onion, mature, raw", group: "ausnut-248" }), false);
   assert.equal(isSideWorthy({ name: "Onion, mature, cooked", group: "ausnut-248" }), false);

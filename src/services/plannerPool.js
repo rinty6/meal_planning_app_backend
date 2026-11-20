@@ -215,6 +215,13 @@ const NOT_ON_A_PLATE = [
   // off sides (LIQUID_ONLY); this keeps it out of every builder.
   /\b(juice|syrup|liquid|brine) only\b/i,
   /\bbabyccino\b/i, // milk froth for children, offered as a cereal's milk (live review, 2026-11-20)
+  // T2, 2026-11-21 (m5-01 follow-up d): part of an egg is an ingredient, not a
+  // meal. Egg yolk alone and egg white alone were offered as mains. A whole
+  // egg ("Egg, chicken, whole, boiled") matches none of these.
+  /\byolk\b/i,
+  /\begg white\b/i,
+  /\balbumen\b/i,
+  /\bwhite only\b/i,
 ];
 // P1, 2026-11-20: "dry" as well as "dried" ("Lentil, green, hulled, dry" got
 // past the old rule onto a dinner plate).
