@@ -12,6 +12,8 @@ import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { MEAL_TYPES } from "../services/mealTypes.js";
 import { scaleNutrients } from "../services/mealLogNutrients.js";
+import { getPlannerPool } from "../services/plannerPool.js";
+import { buildServeProgress, serveProgressGate } from "../services/serveProgress.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 import { formatEnergyKj } from "../utils/energy.js";
 
@@ -356,6 +358,35 @@ mealRoutes.get("/most-consumed/:clerkId", requireClerkAuth, ensureClerkIdMatch("
     res.status(500).json({ error: "Failed to fetch most-consumed meals" });
   }
 });
+
+// T5, 2026-11-21 (m6-03): serve progress for one day, computed but dark.
+// Nothing shows serves yet (m0-06), so it answers only with SERVE_PROGRESS=on.
+// The gate runs before the auth chain, so a disabled endpoint reads nothing
+// from the database (attachUserFromAuth looks the user up).
+mealRoutes.get(
+  "/serve-progress/:clerkId",
+  serveProgressGate(),
+  requireClerkAuth,
+  ensureClerkIdMatch("params"),
+  attachUserFromAuth,
+  async (req, res) => {
+    try {
+      const dateStr = normalizeDateString(req.query.date);
+      if (!dateStr) return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
+      const body = await buildServeProgress({
+        db,
+        userId: req.dbUser.userId,
+        dateStr,
+        getTargetContext: getDailyCalorieTargetContext,
+        getPool: getPlannerPool,
+      });
+      res.status(200).json(body);
+    } catch (error) {
+      console.error("Error fetching serve progress:", error);
+      res.status(500).json({ error: "Failed to fetch serve progress" });
+    }
+  },
+);
 
 mealRoutes.get("/recent/:clerkId", requireClerkAuth, ensureClerkIdMatch("params"), attachUserFromAuth, async (req, res) => {
   try {

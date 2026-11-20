@@ -123,3 +123,17 @@ test("T4: energyFactor is the factor before the clamp", () => {
   assert.equal(plan([{ mealType: "breakfast", calories: 800, externalId: null, source: "barcode" }]).energyFactor, 0.8);
   assert.equal(plan([]).energyFactor, null);
 });
+
+test("T5: rowsWithoutServes counts rows that are not catalogue rows found in the pool", () => {
+  const today = summariseToday([
+    { mealType: "breakfast", calories: 300, externalId: "food_porridge", source: "catalog" }, // known
+    { mealType: "breakfast", calories: 0, externalId: "food_porridge", source: "catalog" }, // known: 0 g
+    { mealType: "lunch", calories: 450, externalId: "12345", source: "fatsecret" },
+    { mealType: "lunch", calories: 200, externalId: "food_gone", source: "catalog" },
+    { mealType: "snack", calories: 150, externalId: null, source: "manual" },
+    { mealType: "snack", calories: 90, externalId: "9300000000000", source: "barcode" },
+  ], POOL);
+  assert.equal(today.rowsWithoutServes, 4);
+  assert.equal(today.eatenServes.dairy, 1.2);
+  assert.equal(summariseToday([], POOL).rowsWithoutServes, 0);
+});

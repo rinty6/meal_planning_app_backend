@@ -62,12 +62,16 @@ export const todayFingerprint = (logs = []) => {
 /**
  * @param {object[]} logs           from readTodayLogs (camelCase or snake_case keys)
  * @param {Map<string, object>} poolByPublicId
- * @returns {{ eatenKcal: number, eatenServes: Record<string, number>, loggedMeals: Set<string>, fingerprint: string }}
+ * @returns {{ eatenKcal: number, eatenServes: Record<string, number>, loggedMeals: Set<string>, fingerprint: string, rowsWithoutServes: number }}
+ *   rowsWithoutServes (T5, 2026-11-21): rows that are not catalogue rows found
+ *   in the pool. Their serves are UNKNOWN, not zero, and a screen must be able
+ *   to say so (m6-03).
  */
 export const summariseToday = (logs = [], poolByPublicId = new Map()) => {
   let eatenKcal = 0;
   const eatenServes = Object.fromEntries(SERVE_GROUPS.map((g) => [g, 0]));
   const loggedMeals = new Set();
+  let rowsWithoutServes = 0;
   for (const row of logs) {
     const kcal = Number(row?.calories) || 0;
     eatenKcal += kcal;
@@ -75,15 +79,19 @@ export const summariseToday = (logs = [], poolByPublicId = new Map()) => {
     if (meal) loggedMeals.add(meal);
     const source = row?.source;
     const externalId = row?.externalId ?? row?.external_id;
-    if (source !== "catalog" || !externalId) continue;
-    const food = poolByPublicId.get(externalId);
+    const food = source === "catalog" && externalId ? poolByPublicId.get(externalId) : null;
     const per100 = Number(food?.per100g?.calories_kcal);
-    if (!food || !(per100 > 0) || kcal <= 0) continue;
+    if (!food || !(per100 > 0)) {
+      rowsWithoutServes += 1;
+      continue;
+    }
+    // A found food logged at 0 kcal is 0 g of it: known, and zero serves.
+    if (kcal <= 0) continue;
     const grams = (kcal / per100) * 100;
     for (const g of SERVE_GROUPS) eatenServes[g] += ((Number(food.serves100g?.[g]) || 0) * grams) / 100;
   }
   for (const g of SERVE_GROUPS) eatenServes[g] = round2(eatenServes[g]);
-  return { eatenKcal: Math.round(eatenKcal), eatenServes, loggedMeals, fingerprint: todayFingerprint(logs) };
+  return { eatenKcal: Math.round(eatenKcal), eatenServes, loggedMeals, fingerprint: todayFingerprint(logs), rowsWithoutServes };
 };
 
 /**
