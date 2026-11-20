@@ -62,18 +62,62 @@ export const personalSignals = ({ meal, favoriteTitles = [], mostConsumedByMeal 
   const history = new Set((mostConsumedByMeal?.[meal] || []).map((i) => titleKey(i?.title)));
   const liked = new Set([...(eventProfile.lovedTitles || []), ...(eventProfile.acceptedTitles || [])]);
   const skipped = new Set(eventProfile.skippedTitles || []);
+  // T3, 2026-11-21 (m5-09): a plate's title ("Apple & cheddar") never equals a
+  // food name, so catalogue plates are matched by food id. Title matching
+  // stays for events recorded before this.
+  const likedIds = new Set(eventProfile.likedFoodIds || []);
+  const skippedMainIds = new Set(eventProfile.skippedMainIds || []);
   const keysOf = (food) => [titleKey(food.name), titleKey(food.shortName)].filter(Boolean);
   return {
     bonusFor: (food) => {
       const keys = keysOf(food);
       let bonus = 0;
       if (keys.some((k) => favourites.has(k))) bonus += 0.02;
-      if (keys.some((k) => liked.has(k))) bonus += 0.015;
+      if (keys.some((k) => liked.has(k)) || likedIds.has(food.publicId)) bonus += 0.015;
       if (keys.some((k) => history.has(k))) bonus += 0.01;
       return bonus;
     },
-    isSkipped: (food) => keysOf(food).some((k) => skipped.has(k)),
+    isSkipped: (food) => keysOf(food).some((k) => skipped.has(k)) || skippedMainIds.has(food.publicId),
   };
+};
+
+/**
+ * The food publicIds of a catalogue plate item, main first; [] for anything
+ * else (T3, 2026-11-21). Plate items carry the publicId as food_id (plateToItem).
+ */
+export const plateFoodIds = (item) => {
+  if (item?.source !== "catalog_plate" || !Array.isArray(item.items)) return [];
+  return item.items
+    .map((i) => i?.food_id ?? i?.externalId ?? i?.publicId ?? i?.id)
+    .filter((id) => typeof id === "string" && id.length > 0);
+};
+
+/** The payload recordEvents stores for one item (T3, 2026-11-21: plus food_ids on a catalogue plate). */
+export const eventPayloadFor = (item, payload = {}) => {
+  const foodIds = plateFoodIds(item);
+  return foodIds.length > 0 ? { ...payload, item, food_ids: foodIds } : { ...payload, item };
+};
+
+/**
+ * Adds one event row's plate food ids to an event profile (T3, 2026-11-21).
+ * A skip counts against the plate's MAIN only: the main is what made the plate
+ * unwanted, and sides are shared by many plates. A love or accept counts for
+ * every food on the plate. Rows recorded before food_ids existed fall back to
+ * the plate item stored in the payload.
+ */
+export const addPlateEventFoodIds = (profile, row) => {
+  if (!profile || !row) return profile;
+  const stored = row.payload?.food_ids;
+  const ids = Array.isArray(stored) && stored.length > 0 ? stored : plateFoodIds(row.payload?.item);
+  if (ids.length === 0) return profile;
+  if (row.eventType === "skipped") {
+    if (!profile.skippedMainIds) profile.skippedMainIds = new Set();
+    profile.skippedMainIds.add(ids[0]);
+  } else if (row.eventType === "loved" || row.eventType === "accepted") {
+    if (!profile.likedFoodIds) profile.likedFoodIds = new Set();
+    for (const id of ids) profile.likedFoodIds.add(id);
+  }
+  return profile;
 };
 
 const round1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : 0);

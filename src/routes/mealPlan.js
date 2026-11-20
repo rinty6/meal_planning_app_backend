@@ -14,7 +14,7 @@ import {
 import { enrichRecommendationImages, enrichRecommendationServings, getFoodItemById, searchFoodItems, searchRecipes } from "../services/mealAPI.js";
 import { getAgeFromDateOfBirth, getDailyCalorieTargetContext } from "../services/dailyCalorieTarget.js";
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
-import { buildCatalogRecommendations, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
+import { addPlateEventFoodIds, buildCatalogRecommendations, eventPayloadFor, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
 import { getPlannerPool } from "../services/plannerPool.js";
 import { adjustTargets, indexPoolByPublicId, readTodayLogs, summariseToday, todayFingerprint } from "../services/todayIntake.js";
@@ -344,9 +344,13 @@ const getEventProfile = async (userId) => {
     acceptedTitles: new Set(),
     selectedTitles: new Set(),
     skippedIds: new Set(),
+    // T3, 2026-11-21 (m5-09): catalogue plates by food id (catalogPlates.js).
+    skippedMainIds: new Set(),
+    likedFoodIds: new Set(),
   };
 
   for (const row of rows) {
+    addPlateEventFoodIds(profile, row);
     const title = titleKey(row.itemTitle);
     const id = normalizeKey(row.itemId);
     if (row.eventType === "skipped") {
@@ -756,10 +760,8 @@ const recordEvents = async ({ user, clerkId, eventType, mealType, items, payload
       itemTitle: normalizeWhitespace(item?.title || item?.food_name || item?.itemTitle) || null,
       source: normalizeWhitespace(item?.source) || null,
       rank: Number.isFinite(Number(item?.rank)) ? Number(item.rank) : null,
-      payload: {
-        ...payload,
-        item,
-      },
+      // T3, 2026-11-21: a catalogue plate also stores its food ids, main first.
+      payload: eventPayloadFor(item, payload),
     }))
     .filter((row) => row.itemId || row.itemTitle || eventType === "shuffled");
 

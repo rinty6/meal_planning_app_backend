@@ -5,10 +5,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  addPlateEventFoodIds,
   buildCatalogRecommendations,
+  eventPayloadFor,
   isCatalogPlannerEnabled,
   passesNutrientLimits,
   personalSignals,
+  plateFoodIds,
   plateToItem,
   seedFor,
 } from "./catalogPlates.js";
@@ -163,4 +166,73 @@ test("P4: the snack slot comes back as plate items with shape snack", async () =
     assert.ok(item.items.length >= 1 && item.items.length <= 2, item.title);
   }
   assert.deepEqual(recommendationsByMeal.breakfast, []);
+});
+
+// ---- T3, 2026-11-21 (m5-09): skip and love by food id ------------------------
+
+const profileFrom = (rows) => {
+  const profile = { lovedTitles: new Set(), acceptedTitles: new Set(), skippedTitles: new Set() };
+  for (const row of rows) addPlateEventFoodIds(profile, row);
+  return profile;
+};
+const foodById = new Map(POOL.map((f) => [f.publicId, f]));
+
+test("T3: an event on a catalogue plate stores its food ids, main first", async () => {
+  const plate = (await run()).recommendationsByMeal.dinner[0];
+  const payload = eventPayloadFor(plate, { context: null });
+  assert.deepEqual(payload.food_ids, plate.items.map((i) => i.food_id));
+  assert.equal(payload.food_ids[0], plate.items[0].food_id);
+  assert.equal(payload.item, plate);
+  assert.equal(payload.context, null);
+  // anything that is not a catalogue plate is stored exactly as before
+  const legacy = { id: "fs_1", title: "Chicken salad", source: "fatsecret" };
+  assert.deepEqual(eventPayloadFor(legacy, { a: 1 }), { a: 1, item: legacy });
+  assert.deepEqual(plateFoodIds({ source: "catalog_plate" }), []);
+});
+
+test("T3: a skipped plate's main is never used again; its sides are not skipped", async () => {
+  const plate = (await run()).recommendationsByMeal.dinner[0];
+  const [mainId, ...sideIds] = plateFoodIds(plate);
+  assert.ok(sideIds.length > 0, plate.title);
+  const eventProfile = profileFrom([{ eventType: "skipped", payload: eventPayloadFor(plate) }]);
+  assert.deepEqual([...eventProfile.skippedMainIds], [mainId]);
+
+  const { isSkipped } = personalSignals({ meal: "dinner", eventProfile });
+  assert.equal(isSkipped(foodById.get(mainId)), true);
+  for (const id of sideIds) assert.equal(isSkipped(foodById.get(id)), false, id);
+
+  const again = await run({ eventProfile });
+  const ids = Object.values(again.recommendationsByMeal).flat().flatMap((p) => p.items.map((i) => i.food_id));
+  assert.ok(!ids.includes(mainId));
+});
+
+test("T3: every food of a loved or accepted plate gets the liked bonus", async () => {
+  const [loved, accepted] = (await run()).recommendationsByMeal.lunch;
+  const eventProfile = profileFrom([
+    { eventType: "loved", payload: eventPayloadFor(loved) },
+    { eventType: "accepted", payload: eventPayloadFor(accepted) },
+    { eventType: "shown", payload: eventPayloadFor(accepted) }, // shown counts for nothing
+  ]);
+  const { bonusFor } = personalSignals({ meal: "lunch", eventProfile });
+  for (const id of [...plateFoodIds(loved), ...plateFoodIds(accepted)]) {
+    assert.equal(bonusFor(foodById.get(id)), 0.015, id);
+  }
+  const untouched = POOL.find((f) => !eventProfile.likedFoodIds.has(f.publicId));
+  assert.equal(bonusFor(untouched), 0);
+});
+
+test("T3: an event stored before food_ids still counts through its stored plate", async () => {
+  const plate = (await run()).recommendationsByMeal.dinner[1];
+  const eventProfile = profileFrom([{ eventType: "skipped", payload: { item: plate } }]);
+  assert.deepEqual([...eventProfile.skippedMainIds], [plate.items[0].food_id]);
+});
+
+test("T3: an old title-only event still works", () => {
+  const eventProfile = profileFrom([{ eventType: "skipped", itemTitle: "Tofu", payload: { item: { title: "Tofu" } } }]);
+  eventProfile.skippedTitles.add("tofu");
+  eventProfile.lovedTitles.add("salmon");
+  const { bonusFor, isSkipped } = personalSignals({ meal: "dinner", eventProfile });
+  assert.equal(eventProfile.skippedMainIds, undefined);
+  assert.equal(isSkipped({ name: "Tofu, firm", shortName: "Tofu", publicId: "food_x" }), true);
+  assert.equal(bonusFor({ name: "Salmon, baked", shortName: "Salmon", publicId: "food_y" }), 0.015);
 });
