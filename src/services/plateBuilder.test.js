@@ -239,12 +239,21 @@ test("the liquid left in a can is never a food (live review, 2026-11-20)", () =>
 });
 
 test("T2: egg yolk and egg white alone never go on a plate; a whole egg does", () => {
+  // Live review, 2026-11-21: the real catalogue names (6 matched the first draft).
   assert.equal(isPlateWorthy({ name: "Egg, chicken, yolk, raw", subgroup_code: "ausnut-171" }), false);
-  assert.equal(isPlateWorthy({ name: "Egg white, chicken, raw", subgroup_code: "ausnut-171" }), false);
-  assert.equal(isPlateWorthy({ name: "Albumen, egg, dried", subgroup_code: "ausnut-171" }), false);
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, yolk, scrambled, with cow's milk", subgroup_code: "ausnut-172" }), false);
+  assert.equal(isPlateWorthy({ name: "Egg, chicken, white (albumen) only, cooked", subgroup_code: "ausnut-171" }), false);
   assert.equal(isPlateWorthy({ name: "Egg, chicken, white only, boiled", subgroup_code: "ausnut-171" }), false);
   assert.equal(isPlateWorthy({ name: "Egg, chicken, whole, boiled", subgroup_code: "ausnut-171" }), true);
   assert.equal(isPlateWorthy({ name: "Egg, chicken, whole, poached", subgroup_code: "ausnut-171" }), true);
+  // An egg-white omelette is a dish people eat.
+  assert.equal(isPlateWorthy({ name: "Omelette, chicken egg, white only, fried", subgroup_code: "ausnut-172" }), true);
+});
+
+test("cooking ingredients found in the variety run never go on a plate (live review, 2026-11-21)", () => {
+  assert.equal(isPlateWorthy({ name: "Starch, potato", subgroup_code: "ausnut-121" }), false);
+  assert.equal(isPlateWorthy({ name: "Bean, paste, sweet", subgroup_code: "ausnut-252" }), false);
+  assert.equal(isPlateWorthy({ name: "Bean, kidney, canned, drained", subgroup_code: "ausnut-251" }), true);
 });
 
 test("onions and other aromatics are never a side, raw or cooked", () => {

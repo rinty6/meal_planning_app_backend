@@ -218,10 +218,14 @@ const NOT_ON_A_PLATE = [
   // T2, 2026-11-21 (m5-01 follow-up d): part of an egg is an ingredient, not a
   // meal. Egg yolk alone and egg white alone were offered as mains. A whole
   // egg ("Egg, chicken, whole, boiled") matches none of these.
-  /\byolk\b/i,
-  /\begg white\b/i,
-  /\balbumen\b/i,
-  /\bwhite only\b/i,
+  // Live review, 2026-11-21: limited to names starting "Egg,". The live
+  // catalogue has 6 matches for the first draft, and one of them,
+  // "Omelette, chicken egg, white only, fried", is a dish people do eat.
+  /^egg, .*\b(yolk|albumen|white only)\b/i,
+  // Live review, 2026-11-21 (variety run): "Starch, potato" was a lunch side
+  // and "Bean, paste, sweet" a dinner main; both are cooking ingredients.
+  /^starch\b/i,
+  /^bean, paste\b/i,
 ];
 // P1, 2026-11-20: "dry" as well as "dried" ("Lentil, green, hulled, dry" got
 // past the old rule onto a dinner plate).

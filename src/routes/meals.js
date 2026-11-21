@@ -12,7 +12,7 @@ import { sendNotificationToUser } from "../services/notificationService.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
 import { MEAL_TYPES } from "../services/mealTypes.js";
 import { scaleNutrients } from "../services/mealLogNutrients.js";
-import { getPlannerPool } from "../services/plannerPool.js";
+import { getPlannerDrinks, getPlannerPool } from "../services/plannerPool.js";
 import { buildServeProgress, serveProgressGate } from "../services/serveProgress.js";
 import { requireClerkAuth, ensureClerkIdMatch, attachUserFromAuth } from "../middleware/auth.js";
 import { formatEnergyKj } from "../utils/energy.js";
@@ -317,7 +317,10 @@ mealRoutes.put("/update/:id", requireClerkAuth, attachUserFromAuth, async (req, 
       return res.status(404).json({ error: "Meal not found" });
     }
     if (current.nutrients) {
-      updateValues.nutrients = scaleNutrients(current.nutrients, current.servings, safeServings);
+      // Live review, 2026-11-21: rows from before the servings column hold
+      // null there; the column's default is 1, so null is read as 1 serving.
+      const oldServings = Number(current.servings) > 0 ? Number(current.servings) : 1;
+      updateValues.nutrients = scaleNutrients(current.nutrients, oldServings, safeServings);
     }
 
     const updated = await db
@@ -378,7 +381,8 @@ mealRoutes.get(
         userId: req.dbUser.userId,
         dateStr,
         getTargetContext: getDailyCalorieTargetContext,
-        getPool: getPlannerPool,
+        // Live review, 2026-11-21: drinks too, so a logged flat white's dairy counts.
+        getPool: async (opts) => [...(await getPlannerPool(opts)), ...(await getPlannerDrinks(opts))],
       });
       res.status(200).json(body);
     } catch (error) {

@@ -16,7 +16,7 @@ import { getAgeFromDateOfBirth, getDailyCalorieTargetContext } from "../services
 import { buildMealCalorieTargets } from "../services/mealSplit.js";
 import { addPlateEventFoodIds, buildCatalogRecommendations, eventPayloadFor, isCatalogPlannerEnabled } from "../services/catalogPlates.js";
 import { MEAL_TYPES as ALL_MEAL_TYPES } from "../services/mealTypes.js";
-import { getPlannerPool } from "../services/plannerPool.js";
+import { getPlannerDrinks, getPlannerPool } from "../services/plannerPool.js";
 import { planNotes } from "../services/planNotes.js";
 import { adjustTargets, indexPoolByPublicId, readTodayLogs, summariseToday, todayFingerprint } from "../services/todayIntake.js";
 import { getMostConsumedForUser } from "../services/mostConsumedMeals.js";
@@ -924,7 +924,10 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
         // P5, 2026-11-20: unlogged meals take what is left of the day's food
         // groups, and their energy moves within 80-120% (todayIntake.js).
         const pool = await getPlannerPool({ db });
-        const today = summariseToday(todayLogs, indexPoolByPublicId(pool));
+        // Live review, 2026-11-21: logged drinks (a flat white, a glass of
+        // milk) are looked up too, so their dairy counts instead of being unknown.
+        const drinks = await getPlannerDrinks({ db });
+        const today = summariseToday(todayLogs, indexPoolByPublicId([...pool, ...drinks]));
         const adjusted = adjustTargets({
           mealKcal: mealTargets,
           dailyServes: targetContext.serveTargets,

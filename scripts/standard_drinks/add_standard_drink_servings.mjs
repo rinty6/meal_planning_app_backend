@@ -31,6 +31,7 @@ import { ENV } from "../../src/config/env.js";
 import { catalogFoodServingsTable as servingsT, catalogFoodsTable as foodsT, nutritionProfilesTable as profilesT } from "../../src/db/food_schema.js";
 import {
   DESCRIPTION_PREFIX,
+  isStandardDrinkCandidate,
   profileMatchesServing,
   standardDrinkProfile,
   standardDrinkServing,
@@ -55,6 +56,12 @@ async function main() {
       profileId: servingsT.nutritionProfileId,
       alcoholG: profilesT.alcoholG,
       basisQuantity: profilesT.basisQuantity,
+      // Live review, 2026-11-21: the food's AUSNUT sub-group, so only drinks
+      // get a standard-drink serving (isStandardDrinkCandidate).
+      group: sql`(select grp.slug from food_categories fc
+        join categories c on c.id = fc.category_id
+        join categories grp on grp.id = c.parent_id
+        where fc.food_id = ${foodsT.id} and fc.is_primary limit 1)`,
     })
     .from(foodsT)
     .innerJoin(servingsT, and(eq(servingsT.foodId, foodsT.id), eq(servingsT.isDefault, true)))
@@ -70,7 +77,12 @@ async function main() {
 
   const plan = [];
   const skipped = [];
+  const notDrinks = [];
   for (const row of rows) {
+    if (!isStandardDrinkCandidate(row)) {
+      notDrinks.push(row.name);
+      continue;
+    }
     if (hasOne.has(row.foodId)) {
       skipped.push(`${row.name}: already has a standard-drink serving`);
       continue;
@@ -91,7 +103,8 @@ async function main() {
   for (const { row, serving } of plan) {
     console.log(`  ${row.name} | ${row.servingDescription} (${row.grams} g) | ${serving.defaultStandardDrinks} | ${serving.description}, ${serving.grams} g`);
   }
-  console.log(`\n  ${plan.length} of ${rows.length} alcoholic foods get a standard-drink serving.`);
+  console.log(`\n  ${plan.length} of ${rows.length} foods with alcohol get a standard-drink serving.`);
+  console.log(`  ${notDrinks.length} are not drinks (dishes, sauces, desserts, cooking wine, de-alcoholised) and keep their serving as it is.`);
   if (skipped.length) {
     console.log(`  ${skipped.length} skipped:`);
     for (const line of skipped) console.log(`    ${line}`);

@@ -35,6 +35,27 @@ export const standardDrinkServing = ({ alcoholG, grams } = {}) => {
   };
 };
 
+// Live review, 2026-11-21: the first dry run gave all 112 foods with any
+// alcohol a new DEFAULT serving, including "Chicken, wing, marinated" (1
+// standard drink = 10,000 g), risottos, stir-fries, soy sauce, fruit cake and
+// de-alcoholised wine (5 litres). Only drinks get a standard-drink serving:
+// the alcoholic beverage groups (291 beers, 292 wines, 293 spirits, 294 cider
+// and perry, 295 other alcoholic beverages) plus eggnog (198, 4.4 g per
+// 100 g). Ingredients inside those groups (cooked wine and spirits, mirin,
+// bitters, pure ethanol) are not drinks either. 296 de-alcoholised drinks
+// stay out on purpose.
+export const DRINK_GROUPS = new Set(["ausnut-291", "ausnut-292", "ausnut-293", "ausnut-294", "ausnut-295"]);
+export const NOT_A_DRINK = /\bcooked\b|\bmirin\b|\bbitters\b|\bethanol\b/i;
+const ALCOHOLIC_MILK_DRINK = { group: "ausnut-198", minAlcoholPer100g: 2 };
+
+/** Does this food get a standard-drink serving at all? */
+export const isStandardDrinkCandidate = ({ group, name, alcoholG, grams } = {}) => {
+  if (NOT_A_DRINK.test(String(name || ""))) return false;
+  if (DRINK_GROUPS.has(group)) return true;
+  const per100 = Number(grams) > 0 ? (Number(alcoholG) / Number(grams)) * 100 : 0;
+  return group === ALCOHOLIC_MILK_DRINK.group && per100 >= ALCOHOLIC_MILK_DRINK.minAlcoholPer100g;
+};
+
 /** True when a serving description is already a standard drink (the script is idempotent). */
 // T7, 2026-11-21: the brief's formula reads the profile as describing the
 // default serving. A profile whose basis_quantity is not that serving's grams

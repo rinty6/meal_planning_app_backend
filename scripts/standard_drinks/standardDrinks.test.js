@@ -7,6 +7,7 @@ import { getTableColumns } from "drizzle-orm";
 import { catalogFoodServingsTable, nutritionProfilesTable } from "../../src/db/food_schema.js";
 import {
   SCALED_NUTRIENTS,
+  isStandardDrinkCandidate,
   isStandardDrinkDescription,
   profileMatchesServing,
   standardDrinkProfile,
@@ -95,4 +96,29 @@ test("the new serving row has every NOT NULL column and is the default", () => {
   assert.equal(row.gramsEquivalent, 91.2);
   assert.equal(row.description, "1 standard drink (about 90 ml)");
   for (const key of Object.keys(row)) assert.ok(key in columns, key);
+});
+
+test("only drinks get a standard-drink serving (live review, 2026-11-21)", () => {
+  const yes = (group, name, alcoholG = 10, grams = 100) => assert.equal(isStandardDrinkCandidate({ group, name, alcoholG, grams }), true, name);
+  const no = (group, name, alcoholG = 10, grams = 100) => assert.equal(isStandardDrinkCandidate({ group, name, alcoholG, grams }), false, name);
+  yes("ausnut-291", "Beer, full strength (alcohol 4-4.9% v/v)");
+  yes("ausnut-292", "Wine, red");
+  yes("ausnut-293", "Spirit, all types");
+  yes("ausnut-294", "Cider, apple, alcoholic");
+  yes("ausnut-295", "Mixed drink, ready to drink, spirit & cola soft drink");
+  yes("ausnut-198", "Eggnog (egg nog), made from cow's milk, egg & sugar", 4.4, 100);
+  // dishes, sauces and desserts with a trace of alcohol
+  no("ausnut-183", "Chicken, wing, marinated, cooked", 0.054, 54);
+  no("ausnut-135", "Risotto, plain", 0.2, 100);
+  no("ausnut-231", "Sauce, soy, commercial", 1.4, 100);
+  no("ausnut-133", "Cake, fruit, homemade, iced", 0.6, 100);
+  // ingredients inside the drink groups, and de-alcoholised drinks
+  no("ausnut-292", "Wine, red, cooked");
+  no("ausnut-293", "Spirit, all types, cooked");
+  no("ausnut-295", "Mirin");
+  no("ausnut-295", "Bitters");
+  no("ausnut-295", "Ethanol 100%");
+  no("ausnut-296", "Wine, red, de-alcoholised", 0.2, 100);
+  // a flavoured milk without alcohol worth a serving
+  no("ausnut-198", "Milkshake, chocolate", 0.1, 100);
 });
