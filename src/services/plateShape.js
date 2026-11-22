@@ -147,15 +147,27 @@ const WHOLE_OPTIONAL = Object.freeze({
  * The side slots for a main in a meal, required ones first.
  * @returns {ReadonlyArray<{ name: string, required: boolean, groups: Set<string>, only?: Function, sameGroupOk?: boolean }>}
  */
+// iPhone test, 2026-11-22: mains now stop at 1.5 servings (plateBuilder
+// MAIN_MAX_SERVINGS). For a big day (2,991 kcal, dinner ~1,050 kcal) a capped
+// main and two ordinary sides could not reach the target, and 19 of 30 dinner
+// cards went missing. One EXTRA side is allowed only when the main is already
+// at its cap (`roomOnly`): fruit or yoghurt at lunch, a second vegetable or
+// bread at dinner. Ordinary days never see it.
+const EXTRA_FOR_BIG_MEALS = Object.freeze({
+  lunch: slot("extra", false, groups(range(161, 167), 192), { roomOnly: true }),
+  dinner: slot("extra", false, groups(GREEN, 122, 123), { roomOnly: true }),
+});
+const withExtra = (slots, meal) => (EXTRA_FOR_BIG_MEALS[meal] ? [...slots, EXTRA_FOR_BIG_MEALS[meal]] : slots);
+
 export const slotsFor = (shape, main, meal) => {
   switch (shape) {
     case "whole":
       if (SOUP_GROUPS.has(main?.group)) return [WHOLE_OPTIONAL.soup];
-      return WHOLE_OPTIONAL[meal] ? [WHOLE_OPTIONAL[meal]] : [];
+      return WHOLE_OPTIONAL[meal] ? withExtra([WHOLE_OPTIONAL[meal]], meal) : [];
     case "needs_starch":
-      return [STARCH_FOR_CURRY, GREEN_OPTIONAL];
+      return withExtra([STARCH_FOR_CURRY, GREEN_OPTIONAL], meal);
     case "meat_and_veg":
-      return [STARCH_FOR_MEAT, GREEN_REQUIRED];
+      return withExtra([STARCH_FOR_MEAT, GREEN_REQUIRED], meal);
     case "cereal":
       return DAIRY_MAIN_GROUPS.has(main?.group) || MADE_WITH_MILK.test(String(main?.name || ""))
         ? [FRUIT_OPTIONAL]

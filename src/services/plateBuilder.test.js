@@ -10,6 +10,7 @@ import {
   bestPortion,
   buildPlates,
   isSideWorthy,
+  mainCapGrams,
   plateTitle,
   portionsFor,
   primaryGroup,
@@ -254,6 +255,20 @@ test("cooking ingredients found in the variety run never go on a plate (live rev
   assert.equal(isPlateWorthy({ name: "Starch, potato", subgroup_code: "ausnut-121" }), false);
   assert.equal(isPlateWorthy({ name: "Bean, paste, sweet", subgroup_code: "ausnut-252" }), false);
   assert.equal(isPlateWorthy({ name: "Bean, kidney, canned, drained", subgroup_code: "ausnut-251" }), true);
+  // iPhone test, 2026-11-22: a deep-fried fruit fritter is a dessert, not a breakfast.
+  assert.equal(isPlateWorthy({ name: "Fritter, fruit, all types", subgroup_code: "ausnut-136" }), false);
+  assert.equal(isPlateWorthy({ name: "Fritter, zucchini, fried or deep-fried", subgroup_code: "ausnut-249" }), true);
+});
+
+test("a main stops at 1.5 servings; piece foods (a pizza slice) may reach 250 g (iPhone test, 2026-11-22)", () => {
+  const cereal = { servings: [{ description: "1 cup (90 g)", grams: 90, isDefault: true }] };
+  assert.equal(mainCapGrams(cereal), 135);
+  const fillet = { servings: [{ description: "1 fillet, medium (110 g)", grams: 110, isDefault: true }] };
+  assert.equal(mainCapGrams(fillet), 165);
+  const pizza = { servings: [{ description: "1 slice (100 g)", grams: 100, isDefault: true }] };
+  assert.equal(mainCapGrams(pizza), 250);
+  const smallDefault = { servings: [{ description: "1 fillet, small (40 g)", grams: 40, isDefault: true }] };
+  assert.equal(mainCapGrams(smallDefault), 100);
 });
 
 test("onions and other aromatics are never a side, raw or cooked", () => {

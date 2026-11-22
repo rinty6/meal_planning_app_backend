@@ -189,12 +189,13 @@ export const portionsFor = (food, role = "side") => {
  * of a serving, not the default serving) cost a little extra, so between two
  * near-equal options the ordinary one wins.
  */
-export const bestPortion = (food, wantKcal, role = "side") => {
+export const bestPortion = (food, wantKcal, role = "side", { maxGrams = Infinity } = {}) => {
   const perGram = kcalPerGram(food);
   if (perGram <= 0) return null;
   const slack = Math.max(wantKcal, 50) * 0.04;
   let best = null;
   for (const p of portionsFor(food, role)) {
+    if (p.grams > maxGrams) continue;
     const kcal = p.grams * perGram;
     const miss = Math.abs(kcal - wantKcal);
     const unusual = (p.quantity === 1 ? 0 : 1) + (p.isDefault ? 0 : 1);
@@ -370,6 +371,32 @@ const OPTIONAL_NEED = 0.5;
 const mainDefaultGrams = (main) =>
   Number(main.defaultGrams) || (main.servings || []).find((s) => s.isDefault)?.grams || 100;
 
+// iPhone test, 2026-11-22: once whole dishes and steaks took fewer sides, the
+// main soaked up the rest of the meal's energy: 180 g of barley cereal (two
+// cups), 350 g of Greek yoghurt, 248 g of silver perch (750 kcal) for a
+// 2,991 kcal day. A main now stops at MAIN_MAX_SERVINGS of its ordinary
+// serving (never below MAIN_MIN_CAP_G, so a 60 g "small fillet" default does
+// not starve the plate); the optional side slots fill the rest, as they
+// already do when the main would pass OPTIONAL_ROOM_SERVINGS.
+export const MAIN_MAX_SERVINGS = 1.5;
+// Foods whose ordinary serving is ONE PIECE ("1 slice", "1 piece", "1
+// dumpling") are eaten several at a time: 1.5 slices of pizza is not a
+// dinner. Their cap is at least PIECE_MIN_CAP_G (about 2-3 pizza slices or 8
+// sushi pieces).
+const PIECE_UNIT = /\b(slice|piece|nugget|wing|dumpling|ball|stick|finger|skewer|roll, sushi|sushi)\b/i;
+const PIECE_MIN_CAP_G = 250;
+// Sides grow only for a plate still this short after the capped main, up to
+// SIDE_GROW_MAX of their ordinary portion, and stop once within SIDE_GROW_STOP.
+const SIDE_GROW_FROM = 0.1;
+const SIDE_GROW_STOP = 0.03;
+const SIDE_GROW_MAX = 2;
+const MAIN_MIN_CAP_G = 100;
+export const mainCapGrams = (main) => {
+  const def = (main.servings || []).find((s) => s.isDefault);
+  const floor = PIECE_UNIT.test(String(def?.description || "")) ? PIECE_MIN_CAP_G : MAIN_MIN_CAP_G;
+  return Math.max(floor, MAIN_MAX_SERVINGS * mainDefaultGrams(main));
+};
+
 const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = null }) => {
   // P2, 2026-11-20: the plate follows the main's shape (plateShape.js).
   // Required slots are filled first; optional slots only when the plate has
@@ -379,7 +406,8 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   const shape = shapeFor(main, meal);
   if (!shape) return null; // a vegetable dish is a side, not a main (live review, 2026-11-20)
   const slots = slotsFor(shape, main, meal);
-  const mainEstimate = bestPortion(main, target * 0.55, "main");
+  const mainCap = { maxGrams: mainCapGrams(main) };
+  const mainEstimate = bestPortion(main, target * 0.55, "main", mainCap);
   let running = mainEstimate ? servesFor(main, mainEstimate.grams) : Object.fromEntries(ADG_GROUPS.map((g) => [g, 0]));
   const chosen = [];
   // An optional side never repeats the food group of the main or of another
@@ -392,14 +420,17 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   const perGramMain = kcalPerGram(main);
   const ordered = [...slots.filter((s) => s.required), ...slots.filter((s) => !s.required)];
   for (const s of ordered) {
-    if (chosen.length >= MAX_SIDES) break;
+    // A roomOnly slot (a big day's extra side, plateShape.js) may be a third side.
+    if (chosen.length >= (s.roomOnly ? MAX_SIDES + 1 : MAX_SIDES)) break;
     const need = serveNeed(running, serveTarget);
     let room = true;
     if (!s.required) {
       const sidesKcal = chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
       const mainGrams = perGramMain > 0 ? (target - sidesKcal) / perGramMain : 0;
-      room = mainGrams > OPTIONAL_ROOM_SERVINGS * mainDefaultGrams(main);
+      // 2026-11-22: "room" now means the main would pass its cap.
+      room = mainGrams > Math.max(OPTIONAL_ROOM_SERVINGS * mainDefaultGrams(main), mainCapGrams(main));
     }
+    if (s.roomOnly && !room) continue;
     let best = null;
     for (const side of pool) {
       if (!fitsSlot(side, s)) continue;
@@ -432,7 +463,7 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
     const sidesKcal = chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
     const want = target - sidesKcal;
     if (want >= target * MIN_MAIN_SHARE) {
-      mainPortion = bestPortion(main, want, "main");
+      mainPortion = bestPortion(main, want, "main", mainCap);
       break;
     }
     const lastOptional = chosen.map((c) => c.required).lastIndexOf(false);
@@ -441,6 +472,24 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   }
   // A whole dish alone is a plate (decision Q1); any other main needs a side.
   if (!mainPortion || (chosen.length === 0 && shape !== "whole")) return null;
+
+  // 3. 2026-11-22: when the main stopped at its cap and the plate is still
+  //    more than SIDE_GROW_FROM short, the sides grow (up to SIDE_GROW_MAX
+  //    times their ordinary portion), never the main: a big eater gets two
+  //    potatoes, not 400 g of steak. Required sides (the starch) grow first.
+  let deficit = target - mainPortion.kcal - chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
+  if (deficit > target * SIDE_GROW_FROM) {
+    const order = [...chosen.filter((c) => c.required), ...chosen.filter((c) => !c.required)];
+    for (const c of order) {
+      if (deficit <= target * SIDE_GROW_STOP) break;
+      const maxGrams = Math.min(GRAMS.sideMax, c.portion.grams * SIDE_GROW_MAX);
+      const grown = bestPortion(c.side, c.portion.kcal + deficit, "side", { maxGrams });
+      if (grown && grown.kcal > c.portion.kcal) {
+        deficit -= grown.kcal - c.portion.kcal;
+        c.portion = grown;
+      }
+    }
+  }
 
   const items = [itemFor(main, "main", mainPortion), ...chosen.map((c) => itemFor(c.side, "side", c.portion))];
   const unusual = [mainPortion, ...chosen.map((c) => c.portion)]

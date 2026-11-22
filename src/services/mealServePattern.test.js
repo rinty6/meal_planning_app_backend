@@ -73,7 +73,13 @@ const MAIN_GROUPS = ["ausnut-151", "ausnut-183", "ausnut-181", "ausnut-206"];
 // optional lunch side may be a salad vegetable or a yoghurt. A plain meat main
 // now always takes a starch and a green side, so it can no longer show the
 // side choice following the meal's serve need.
-const mains = Array.from({ length: 8 }, (_, i) => food(`Main${i} burger, cooked`, MAIN_GROUPS[i % 4], 220, { protein: 1 }));
+// 2026-11-22: a burger's ordinary serving is one burger (~300 g). With the
+// 150 g serving the main cap (1.5 servings) always left "room", so the
+// optional side was filled whatever the meal lacked and the test lost its point.
+const mains = Array.from({ length: 8 }, (_, i) => ({
+  ...food(`Main${i} burger, cooked`, MAIN_GROUPS[i % 4], 220, { protein: 1 }),
+  servings: [{ description: "1 burger (300 g)", grams: 300, isDefault: true }],
+}));
 const sides = [
   ...Array.from({ length: 5 }, (_, i) => food(`Veg${i}, steamed`, "ausnut-242", 35, { vegetable: 1.3 })),
   ...Array.from({ length: 5 }, (_, i) => food(`Rice${i}, cooked`, "ausnut-121", 140, { grain: 1.3 })),

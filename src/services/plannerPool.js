@@ -226,6 +226,10 @@ const NOT_ON_A_PLATE = [
   // and "Bean, paste, sweet" a dinner main; both are cooking ingredients.
   /^starch\b/i,
   /^bean, paste\b/i,
+  // iPhone test, 2026-11-22: "Fritter, fruit, all types" (deep-fried battered
+  // fruit, 315 kcal and 21 g fat per 100 g) was a 566 kcal breakfast main. It is
+  // a dessert; not flagged discretionary in the data, so excluded here.
+  /^fritter, fruit\b/i,
 ];
 // P1, 2026-11-20: "dry" as well as "dried" ("Lentil, green, hulled, dry" got
 // past the old rule onto a dinner plate).
