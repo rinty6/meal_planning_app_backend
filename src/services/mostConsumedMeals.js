@@ -2,6 +2,8 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { mealLogsTable } from "../db/schema.js";
 import { MEAL_TYPES } from "./mealTypes.js";
+import { getPlannerDrinks, getPlannerPool } from "./plannerPool.js";
+import { matchCatalogFood, singular, usualPlateFor } from "./usualFoods.js";
 
 const toNumber = (value) => {
   const parsed = Number(value);
@@ -61,10 +63,29 @@ const addMealToAggregate = (aggregateMap, key, meal, rawTitle, mealType) => {
     existing.count += 1;
     existing.number_appearance = existing.count;
     if (!existing.image && meal.image) existing.image = meal.image;
+    existing.titleVariants.set(rawTitle, (existing.titleVariants.get(rawTitle) || 0) + 1);
     return;
   }
 
-  aggregateMap.set(key, createAggregateItem(meal, rawTitle, mealType));
+  const item = createAggregateItem(meal, rawTitle, mealType);
+  item.titleVariants = new Map([[rawTitle, 1]]);
+  aggregateMap.set(key, item);
+};
+
+// 2026-11-24 (decision D3, MOST_EATEN_STRIP_DESIGN.html): "Banana" (54) and
+// "Bananas" (28) are one food. Only letter case, spacing and a plural last
+// word merge; different names stay apart.
+export const mergeKey = (title) => {
+  const words = normalizeKey(title).split(" ").filter(Boolean);
+  if (words.length > 0) words[words.length - 1] = singular(words[words.length - 1]);
+  return words.join(" ");
+};
+
+// The name a merged food shows: the spelling the user logged most often.
+const finishAggregate = ({ titleVariants, ...item }) => {
+  if (!titleVariants) return item;
+  const [title] = [...titleVariants.entries()].sort((a, b) => b[1] - a[1])[0];
+  return { ...item, title, food_name: title };
 };
 
 const sortMostConsumed = (items) =>
@@ -74,6 +95,23 @@ const sortMostConsumed = (items) =>
       if (right.count !== left.count) return right.count - left.count;
       return String(left.title || "").localeCompare(String(right.title || ""));
     });
+
+/**
+ * Each strip item gets `usual_plate`, the one-food plate its food page opens
+ * (usualFoods.js, decision D1). The catalogue match uses the planner's cached
+ * pool and drinks; if they cannot load, every item still gets a plate built
+ * from what the user logged.
+ */
+const withUsualPlates = async (items) => {
+  let foods = [];
+  try {
+    const [pool, drinks] = await Promise.all([getPlannerPool({ db }), getPlannerDrinks({ db })]);
+    foods = [...pool, ...drinks];
+  } catch (error) {
+    console.warn("[mostConsumedMeals] catalogue unavailable; usual plates from the log only", error?.message || error);
+  }
+  return items.map((item) => ({ ...item, usual_plate: usualPlateFor(item, matchCatalogFood(item, foods)) }));
+};
 
 export const getMostConsumedForUser = async (userId, { limit = 10, byMealLimit = 5 } = {}) => {
   const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
@@ -92,8 +130,8 @@ export const getMostConsumedForUser = async (userId, { limit = 10, byMealLimit =
     const rawTitle = normalizeWhitespace(meal.foodName);
     if (!rawTitle) continue;
 
-    // Global strip counts should match the user's SQL grouped by food_name.
-    const globalKey = rawTitle;
+    // Grouped by food name, with case and a plural last word merged (D3).
+    const globalKey = mergeKey(rawTitle);
     if (!globalKey) continue;
 
     const mealType = normalizeMealType(meal.mealType);
@@ -104,11 +142,11 @@ export const getMostConsumedForUser = async (userId, { limit = 10, byMealLimit =
     }
   }
 
-  const allItems = sortMostConsumed(Array.from(globalAggregates.values()));
-  const byMealItems = sortMostConsumed(Array.from(byMealAggregates.values()));
+  const allItems = sortMostConsumed(Array.from(globalAggregates.values(), finishAggregate));
+  const byMealItems = sortMostConsumed(Array.from(byMealAggregates.values(), finishAggregate));
 
   return {
-    all: allItems.slice(0, safeLimit),
+    all: await withUsualPlates(allItems.slice(0, safeLimit)),
     byMeal: Object.fromEntries(
       MEAL_TYPES.map((mealType) => [
         mealType,
