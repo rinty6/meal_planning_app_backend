@@ -107,3 +107,15 @@ test("plates report their serve target and how much they cover", () => {
   assert.deepEqual(plate.serveTarget, serveTarget);
   assert.ok(plate.serveCoverage > 0 && plate.serveCoverage <= 1);
 });
+
+test("what is missing in a group none of the remaining meals carries is shared between them (2026-11-25)", () => {
+  // Breakfast, lunch and dinner logged; 1.4 vegetable serves still missing; only the snack is left.
+  const t = mealServeTargets({ vegetable: 1.4, fruit: 0, grain: 0, protein: 0, dairy: 0 }, { slots: ["snack"] });
+  assert.equal(t.snack.vegetable, 1.4);
+  // Shared equally when two such meals remain.
+  const two = mealServeTargets({ vegetable: 1, fruit: 0, grain: 0, protein: 0, dairy: 0 }, { slots: ["breakfast", "snack"] });
+  assert.equal(two.breakfast.vegetable, 0.5);
+  assert.equal(two.snack.vegetable, 0.5);
+  // A normal day is unchanged: breakfast still carries no vegetables.
+  assert.equal(mealServeTargets({ vegetable: 5 }).breakfast.vegetable, 0);
+});

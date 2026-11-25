@@ -39,6 +39,7 @@ export const planNotes = ({
   energyFactor = null,
   builtAllMeals = false,
   loggedMeals = [],
+  rowsWithoutServes = 0,
 } = {}) => {
   const notes = [];
   // Unknown labels block every plate, so nothing else about the plan is true.
@@ -57,7 +58,12 @@ export const planNotes = ({
   }
 
   // Only a whole-day plan can say a daily target is out of reach.
-  if (builtAllMeals) {
+  // 2026-11-25 (PLAN_STATES_DESIGN.html, user decision): a row logged by
+  // barcode, FatSecret or voice has no food groups and counts as 0 serves, so
+  // a toast breakfast logged by barcode would read as "no grains" and raise a
+  // false "Grains short today". On such a day the serve notes stay silent: a
+  // missed warning is better than a false one.
+  if (builtAllMeals && !(Number(rowsWithoutServes) > 0)) {
     // T4, 2026-11-21: a meal already logged adds what was eaten, not its best
     // idea, so its plates are left out of the best case.
     const logged = new Set(loggedMeals);

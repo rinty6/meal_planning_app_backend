@@ -119,3 +119,18 @@ test("unknown preference labels give one note, and nothing else is judged", () =
   });
   assert.deepEqual(notes, [{ code: "unknown_preference", labels: ["Moonbeans"] }]);
 });
+
+test("a day with a logged row of unknown food groups gives no serve notes (2026-11-25)", () => {
+  const plan = ordinaryPlan();
+  plan.snack = five({ fruit: 1, dairy: 1.5, grain: 1 });
+  const notes = planNotes({
+    recommendationsByMeal: plan,
+    dailyServes: { ...WOMAN, grain: 8.5 },
+    eatenServes: NO_SERVES,
+    builtAllMeals: true,
+    rowsWithoutServes: 1, // e.g. toast logged by barcode
+    energyFactor: 0.6,
+  });
+  // The serve note is silent; the energy note still speaks.
+  assert.deepEqual(notes, [{ code: "day_over_energy" }]);
+});

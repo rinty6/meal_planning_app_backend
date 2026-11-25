@@ -53,7 +53,13 @@ export const mealServeTargets = (daily = {}, { slots = ["breakfast", "lunch", "d
     const covered = slots.reduce((sum, m) => sum + (shares[m] || 0), 0);
     const total = Number(daily?.[group]) || 0;
     for (const meal of slots) {
-      const share = covered > 0 ? (shares[meal] || 0) / covered : 0;
+      // 2026-11-25 (iPhone test): with breakfast, lunch and dinner logged and
+      // 1.4 vegetable serves still missing, only the snack was left, and its
+      // pattern share of vegetables is 0, so the gap was dropped and the
+      // snack never offered vegetables ("Vegetables short today" could not
+      // clear). When none of the remaining meals normally carries a group,
+      // what is missing is shared equally between them instead.
+      const share = covered > 0 ? (shares[meal] || 0) / covered : 1 / slots.length;
       out[meal][group] = round2(total * share);
     }
   }

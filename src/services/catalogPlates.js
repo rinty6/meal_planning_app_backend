@@ -46,6 +46,33 @@ export const passesNutrientLimits = (food, limits = {}) => {
   return true;
 };
 
+/**
+ * The user's nutrient filters, judged on the WHOLE plate as served (user
+ * decision, 2026-11-25). Checked per 100 g of every food, "Protein >= 10 g"
+ * removed every vegetable and fruit from the planner (broccoli has about 3 g
+ * per 100 g), so plates came without vegetables and "Vegetables short today"
+ * could never clear.
+ *   - A minimum ("Protein >= 10 g") applies to breakfast, lunch and dinner,
+ *     not snacks: an apple with cheese has about 8 g of protein.
+ *   - A maximum ("Sodium <= 600 mg") applies to every plate and snack. It
+ *     fails closed: if any food's value is unknown, the total could be
+ *     higher than it looks, so the plate is not offered.
+ */
+export const plateMeetsLimits = (plate, limits = {}, meal = "") => {
+  for (const [key, limit] of Object.entries(limits || {})) {
+    const field = LIMIT_FIELDS[key];
+    if (!field || !limit) continue;
+    const values = (plate?.items || []).map((i) => i?.nutrients?.[field]);
+    const total = values.reduce((sum, v) => sum + (Number.isFinite(Number(v)) && v !== null ? Number(v) : 0), 0);
+    if (limit.max !== undefined && limit.max !== null) {
+      if (values.some((v) => v === null || v === undefined)) return false;
+      if (total > Number(limit.max)) return false;
+    }
+    if (limit.min !== undefined && limit.min !== null && meal !== "snack" && total < Number(limit.min)) return false;
+  }
+  return true;
+};
+
 /** Stable within a day, so the screen doesn't reshuffle on every visit; Shuffle passes its own. */
 export const seedFor = (...parts) => {
   let hash = 2166136261;
@@ -253,9 +280,10 @@ export const buildCatalogRecommendations = async ({
       blocked = candidates.blocked;
       break;
     }
+    // 2026-11-25: nutrient filters are judged on the whole plate (plateMeetsLimits), not per food.
     const limits = preferences.nutrientLimits || {};
-    const mains = candidates.mains.filter((f) => passesNutrientLimits(f, limits));
-    const sides = candidates.sides.filter((f) => passesNutrientLimits(f, limits));
+    const accept = (plate) => plateMeetsLimits(plate, limits, meal);
+    const { mains, sides } = candidates;
     const { bonusFor, isSkipped } = personalSignals({ meal, favoriteTitles, mostConsumedByMeal, eventProfile });
     const excludeFoodIds = new Set([...mains, ...sides].filter(isSkipped).map((f) => f.id));
     const seed = explorationSeed ? seedFor(String(explorationSeed), meal) : seedFor(String(userId), dateStr, meal);
@@ -265,11 +293,11 @@ export const buildCatalogRecommendations = async ({
     const { plates, shortBy } = meal === "snack"
       ? buildSnacks({
         foods: [...mains, ...sides], targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
-        serveTarget: serveTargetsByMeal[meal] || null,
+        serveTarget: serveTargetsByMeal[meal] || null, accept,
       })
       : buildPlates({
         mains, sides, meal, targetKcal: mealTargets[meal], seed, bonusFor, excludeFoodIds,
-        serveTarget: serveTargetsByMeal[meal] || null,
+        serveTarget: serveTargetsByMeal[meal] || null, accept,
       });
     // P6, 2026-11-20: one optional drink per card (DRINKS_UI.html), with the
     // same allergens and diets as the food. Juice on at most one card per meal.

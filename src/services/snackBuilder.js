@@ -106,13 +106,26 @@ export const passesHalfServe = (food, grams) => {
  * nearest `wantKcal`; the default serving wins a near tie. This is how a
  * single snack is sized, so an apple stays "1 apple", never "2 apples".
  */
+// 2026-11-25 (live check on a 2,991 kcal day): with no upper limit a snack
+// was "300 g of raw lettuce and 200 g of dip" or "radish and 158 g of feta".
+// Each food in a snack stays within SNACK_PART_SERVINGS of its ordinary
+// serving and never above SNACK_PART_MAX_G; a big day gets more snacks'
+// worth of energy elsewhere, not a bigger block of cheese.
+const SNACK_PART_SERVINGS = 2;
+const SNACK_PART_MAX_G = 200;
+export const snackPartMaxGrams = (food) => {
+  const def = (food?.servings || []).find((s) => s.isDefault)?.grams || 100;
+  return Math.min(SNACK_PART_MAX_G, SNACK_PART_SERVINGS * def);
+};
+
 const normalPortion = (food, wantKcal) => {
   const perGram = kcalPerGram(food);
   if (perGram <= 0) return null;
   const slack = Math.max(wantKcal, 50) * 0.04; // as bestPortion
+  const maxGrams = snackPartMaxGrams(food);
   let best = null;
   for (const p of portionsFor(food, "side")) {
-    if (p.quantity !== 1) continue;
+    if (p.quantity !== 1 || p.grams > maxGrams) continue;
     const kcal = p.grams * perGram;
     const score = Math.abs(kcal - wantKcal) + (p.isDefault ? 0 : slack);
     if (!best || score < best.score) best = { ...p, kcal, score };
@@ -175,7 +188,7 @@ const snacksFrom = ({ first, partners, target, rand, bonusFor, serveTarget, lack
   for (const partner of partners) {
     if (partner.id === first.id || kindOf(partner) === kindOf(first)) continue;
     if (!allowed.has(snackFamily(partner))) continue;
-    const portion = bestPortion(partner, target - firstPortion.kcal, "side");
+    const portion = bestPortion(partner, target - firstPortion.kcal, "side", { maxGrams: snackPartMaxGrams(partner) });
     if (!portion || !passesHalfServe(partner, portion.grams)) continue;
     const total = firstPortion.kcal + portion.kcal;
     if (!inWindow(total)) continue;
@@ -211,6 +224,7 @@ export const buildSnacks = ({
   count = PLATES_PER_MEAL,
   bonusFor = () => 0,
   excludeFoodIds = new Set(),
+  accept = () => true, // 2026-11-25: nutrient filters on the whole snack (as plates)
 } = {}) => {
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) return { plates: [], shortBy: count };
   const rand = seededRandom(seed);
@@ -225,7 +239,7 @@ export const buildSnacks = ({
 
   const candidates = [];
   for (const first of shuffled(usable, rand).slice(0, FIRST_FOODS_TRIED)) {
-    candidates.push(...snacksFrom({ first, partners, target: targetKcal, rand, bonusFor, serveTarget, lack }));
+    candidates.push(...snacksFrom({ first, partners, target: targetKcal, rand, bonusFor, serveTarget, lack }).filter(accept));
   }
   candidates.sort((a, b) => b.score - a.score);
 

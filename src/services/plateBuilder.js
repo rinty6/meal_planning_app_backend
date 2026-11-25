@@ -98,6 +98,7 @@ export const RAW_IS_NORMAL = new Set([
   "watercress", "chicory", "endive", "kale", "salad",
 ]);
 const VEGETABLE_GROUPS = /^ausnut-24[1-9]$/;
+const BREAD_GROUPS = new Set(["ausnut-122", "ausnut-123"]); // breads, rolls, flat breads
 
 /** The kind of food: the first clause of its name ("onion", "salad", "rice"). */
 export const kindOf = (food) => String(food?.name || "").split(",")[0].trim().toLowerCase();
@@ -389,11 +390,14 @@ const PIECE_MIN_CAP_G = 250;
 // SIDE_GROW_MAX of their ordinary portion, and stop once within SIDE_GROW_STOP.
 const SIDE_GROW_FROM = 0.1;
 const SIDE_GROW_STOP = 0.03;
-const SIDE_GROW_MAX = 2;
+// 2026-11-25: 2 gave 300 g of cooked fennel or lettuce; 1.5 keeps a side a side.
+const SIDE_GROW_MAX = 1.5;
 const MAIN_MIN_CAP_G = 100;
 export const mainCapGrams = (main) => {
   const def = (main.servings || []).find((s) => s.isDefault);
-  const floor = PIECE_UNIT.test(String(def?.description || "")) ? PIECE_MIN_CAP_G : MAIN_MIN_CAP_G;
+  // 2026-11-25: bread slices are not pizza slices (200 g of rye bread was a breakfast).
+  const isBread = main.group === "ausnut-122" || main.group === "ausnut-123";
+  const floor = !isBread && PIECE_UNIT.test(String(def?.description || "")) ? PIECE_MIN_CAP_G : MAIN_MIN_CAP_G;
   return Math.max(floor, MAIN_MAX_SERVINGS * mainDefaultGrams(main));
 };
 
@@ -479,7 +483,13 @@ const buildOne = ({ main, sides, meal, target, rand, bonusFor, serveTarget = nul
   //    potatoes, not 400 g of steak. Required sides (the starch) grow first.
   let deficit = target - mainPortion.kcal - chosen.reduce((sum, c) => sum + c.portion.kcal, 0);
   if (deficit > target * SIDE_GROW_FROM) {
-    const order = [...chosen.filter((c) => c.required), ...chosen.filter((c) => !c.required)];
+    // 2026-11-25 (iPhone test): a 95 g bread roll grew to 190 g (2,423 kJ of
+    // bread beside sardines). Bread never grows past its ordinary portion,
+    // and vegetable sides grow first, which also helps the day's vegetables.
+    const order = [
+      ...chosen.filter((c) => VEGETABLE_GROUPS.test(c.side.group || "")),
+      ...chosen.filter((c) => !VEGETABLE_GROUPS.test(c.side.group || "")),
+    ].filter((c) => !BREAD_GROUPS.has(c.side.group));
     for (const c of order) {
       if (deficit <= target * SIDE_GROW_STOP) break;
       const maxGrams = Math.min(GRAMS.sideMax, c.portion.grams * SIDE_GROW_MAX);
@@ -537,6 +547,9 @@ export const buildPlates = ({
   bonusFor = () => 0,
   excludeFoodIds = new Set(),
   serveTarget = null,
+  // 2026-11-25: the user's nutrient filters, judged on the whole plate
+  // (catalogPlates.plateMeetsLimits). A plate it rejects is never offered.
+  accept = () => true,
 } = {}) => {
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) return { plates: [], shortBy: count };
   const rand = seededRandom(seed);
@@ -550,7 +563,7 @@ export const buildPlates = ({
   const slotFoods = [...sides, ...mains.filter((f) => !sideIds.has(f.id))];
   const usableSides = slotFoods.filter((f) => !excludeFoodIds.has(f.id) && isSideWorthy(f));
 
-  const fits = (plate) => plate && Math.abs(plate.fit - 1) <= MAX_ENERGY_MISS;
+  const fits = (plate) => plate && Math.abs(plate.fit - 1) <= MAX_ENERGY_MISS && accept(plate);
   const candidates = [];
   const mainById = new Map();
   for (const main of shuffled(usableMains, rand).slice(0, MAINS_TRIED)) {

@@ -12,6 +12,7 @@ import {
   passesNutrientLimits,
   personalSignals,
   plateFoodIds,
+  plateMeetsLimits,
   plateToItem,
   seedFor,
 } from "./catalogPlates.js";
@@ -235,4 +236,29 @@ test("T3: an old title-only event still works", () => {
   assert.equal(eventProfile.skippedMainIds, undefined);
   assert.equal(isSkipped({ name: "Tofu, firm", shortName: "Tofu", publicId: "food_x" }), true);
   assert.equal(bonusFor({ name: "Salmon, baked", shortName: "Salmon", publicId: "food_y" }), 0.015);
+});
+
+// ---- nutrient filters on the whole plate (2026-11-25) ----------------------------
+
+const plateOf = (...nutrients) => ({ items: nutrients.map((n) => ({ nutrients: n })) });
+const salmon = { protein_g: 30, sodium_mg: 90 };
+const broccoli = { protein_g: 2.8, sodium_mg: 30 };
+const rice = { protein_g: 4, sodium_mg: null };
+
+test("Protein >= 10 g is the plate's protein: broccoli beside salmon is fine", () => {
+  const limits = { protein: { min: 10 } };
+  assert.equal(plateMeetsLimits(plateOf(salmon, broccoli), limits, "dinner"), true);
+  assert.equal(plateMeetsLimits(plateOf(broccoli, { protein_g: 3 }), limits, "dinner"), false);
+});
+
+test("a minimum filter does not apply to snacks; a maximum does", () => {
+  const appleCheese = plateOf({ protein_g: 0.4, sodium_mg: 1 }, { protein_g: 7.5, sodium_mg: 200 });
+  assert.equal(plateMeetsLimits(appleCheese, { protein: { min: 10 } }, "snack"), true);
+  assert.equal(plateMeetsLimits(appleCheese, { sodium: { max: 150 } }, "snack"), false);
+});
+
+test("a maximum fails closed when any food's value is unknown", () => {
+  assert.equal(plateMeetsLimits(plateOf(salmon, broccoli), { sodium: { max: 600 } }, "lunch"), true);
+  assert.equal(plateMeetsLimits(plateOf(salmon, rice), { sodium: { max: 600 } }, "lunch"), false);
+  assert.equal(plateMeetsLimits(plateOf(salmon, rice), {}, "lunch"), true);
 });

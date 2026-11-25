@@ -1007,6 +1007,7 @@ mealPlanRoutes.get("/recommendations/:clerkId", requireClerkAuth, ensureClerkIdM
             energyFactor: adjusted.energyFactor,
             builtAllMeals: !selectedMealType,
             loggedMeals: today.loggedMeals,
+            rowsWithoutServes: today.rowsWithoutServes,
           }),
         };
         if (!forceExploration) {

@@ -321,3 +321,17 @@ test("short names: watermelon, eggs and tofu", () => {
   assert.equal(shortNameFor({ name: "Egg, chicken, scrambled", baseName: "egg", nameSegments: ["chicken", "scrambled"] }), "Egg");
   assert.equal(shortNameFor({ name: "Tofu (soy bean curd), skin", baseName: "tofu (soy bean curd)", nameSegments: ["skin"] }), "Tofu");
 });
+
+test("on a big day sides grow, but a bread roll stays one roll (2026-11-25)", () => {
+  const roll = food({ name: "Bread, roll, white", group: "ausnut-122", kcal: 300, serves: { grain: 2 },
+    servings: [{ description: "1 bun or roll (95 g)", grams: 95, isDefault: true }] });
+  const fishMain = food({ name: "Sardine, canned in water, drained", group: "ausnut-154", kcal: 180, serves: { protein: 1 },
+    servings: [{ description: "1 can (100 g)", grams: 100, isDefault: true }] });
+  const greens = Array.from({ length: 4 }, (_, i) => food({ name: `Broccoli${i}, boiled`, group: "ausnut-242", kcal: 35, serves: { vegetable: 1.3 },
+    servings: [{ description: "1 cup (100 g)", grams: 100, isDefault: true }] }));
+  const { plates } = buildPlates({ mains: [fishMain], sides: [roll, ...greens], meal: "dinner", targetKcal: 1050, seed: 3 });
+  for (const plate of plates) {
+    const bread = plate.items.find((i) => i.name.startsWith("Bread"));
+    if (bread) assert.ok(bread.grams <= 95, `${bread.grams} g of bread`);
+  }
+});
