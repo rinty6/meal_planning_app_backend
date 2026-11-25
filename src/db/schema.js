@@ -203,6 +203,20 @@ export const mealLogsTable = pgTable('meal_logs', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Glasses of water from the water row on Home and Meal Summary (checklist
+// m6-02, WATER_TOTAL_DESIGN.html D2, 2026-11-25). A glass belongs to no meal,
+// so it is not a meal_logs row. Drinks logged as foods count toward the day's
+// fluids too, but stay in meal_logs (services/waterIntake.js adds them up).
+export const waterLogsTable = pgTable('water_logs', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => usersTable.userId, { onDelete: 'cascade' }).notNull(),
+  date: date('date').notNull(),
+  ml: integer('ml').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  userDateIdx: index('water_logs_user_date_idx').on(table.userId, table.date),
+}));
+
 
 // This table to store full custom recipes (Ingredients & Directions)
 // which it will use at the recipe detail page

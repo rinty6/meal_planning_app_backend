@@ -8,6 +8,7 @@ import {
   demographicsTable,
   favouritesTable,
   mealLogsTable,
+  waterLogsTable,
   mealPlanEventsTable,
   mealPlanPreferencesTable,
   notificationsTable,
@@ -97,6 +98,9 @@ const deleteAppDataForUser = async ({ userId }) => {
   );
   deleted.recipes = await countDeleted(
     db.delete(recipesTable).where(eq(recipesTable.userId, userId))
+  );
+  deleted.waterLogs = await countDeleted(
+    db.delete(waterLogsTable).where(eq(waterLogsTable.userId, userId))
   );
   deleted.mealLogs = await countDeleted(
     db.delete(mealLogsTable).where(eq(mealLogsTable.userId, userId))

@@ -28,6 +28,7 @@ import recommendationRoutes from './routes/recommendation.js';
 import fatSecretRoutes, { canServeFatSecretRequestFromCache } from './routes/fatsecret.js';
 import catalogRoutes, { canServeCatalogRequestFromCache, isBarcodeReportRequest } from './routes/catalog.js';
 import mealPlanRoutes, { ensureMealPlanStorage } from './routes/mealPlan.js';
+import waterRoutes from './routes/water.js';
 import {
   ensureRecommendationFeedbackStorage,
   warmRecommendationRouteDependencies,
@@ -310,6 +311,7 @@ app.use('/api/themealdb', themealdbRoutes);
 app.use('/api/catalog', catalogRoutes);
 app.use('/api/food-recognition', foodRecognitionRoutes);
 app.use('/api/meal-plan', mealPlanRoutes);
+app.use('/api/water', waterRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/notifications', notificationRoutes);
